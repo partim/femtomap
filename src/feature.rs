@@ -78,8 +78,8 @@ impl<F: Feature> StoredFeature<F> {
             feature,
             order,
             bounds: AABB::from_corners(
-                [scale.0, bounds.sw.lon, bounds.sw.lat],
-                [scale.1, bounds.ne.lon, bounds.ne.lat],
+                [scale.0 - f64::EPSILON, bounds.sw.lon, bounds.sw.lat],
+                [scale.1 + f64::EPSILON, bounds.ne.lon, bounds.ne.lat],
             ),
         }
     }
@@ -125,7 +125,7 @@ impl<F> FeatureSet<F> {
     /// The method will shape all features that intersect with the given
     /// bounds. This will include all the features whose bounding box
     /// intersects with `bounds` and whose range of minimal and maximum scale
-    /// as provided to [`FeatureSetBuidler::insert`] includes `scale`.
+    /// as provided to [`FeatureSetBuilder::insert`] includes `scale`.
     ///
     /// The method returns a vec – albeit wrapped in a special helper type –
     /// of all the shapes resulting from shaping features intersecting with

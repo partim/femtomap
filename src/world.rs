@@ -1,4 +1,4 @@
-//! Types for describing the real world.
+//! Types for referencing the real world.
 
 /// A point on the surface of a spherical body.
 ///
@@ -25,5 +25,20 @@ pub struct Point {
 pub struct Rect {
     pub sw: Point,
     pub ne: Point,
+}
+
+impl From<kurbo::Rect> for Rect {
+    fn from(src: kurbo::Rect) -> Rect {
+        Rect {
+            sw: Point { lon: src.x0, lat: src.y0 },
+            ne: Point { lon: src.x1, lat: src.y1 }
+        }
+    }
+}
+
+impl From<Rect> for kurbo::Rect {
+    fn from(src: Rect) -> kurbo::Rect {
+        kurbo::Rect::new(src.sw.lon, src.sw.lat, src.ne.lon, src.ne.lat)
+    }
 }
 

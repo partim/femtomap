@@ -5,4 +5,7 @@ authors = ["Martin Hoffmann <hn@nvnc.de>"]
 edition = "2021"
 
 [dependencies]
-rstar = "0.10"
+cairo-rs = { version = "0.17", features = ["png", "svg", "v1_16"] }
+kurbo    = "0.9.0"
+rstar    = "0.10"
+serde    = { version = "1", features = ["derive"], optional = true }
