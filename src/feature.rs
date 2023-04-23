@@ -24,6 +24,7 @@ use std::slice;
 use std::cmp::Ordering;
 use rstar::{AABB, Envelope, RTree, RTreeObject};
 use crate::world;
+use crate::render::Canvas;
 
 
 //------------ Feature -------------------------------------------------------
@@ -48,7 +49,9 @@ pub trait Feature {
     fn storage_bounds(&self) -> world::Rect;
 
     /// Shapes the feature using the given style.
-    fn shape(&self, style: &Self::Style) -> Self::Shape<'_>;
+    fn shape(
+        &self, style: &Self::Style, canvas: &Canvas
+    ) -> Option<Self::Shape<'_>>;
 }
 
 
@@ -61,7 +64,11 @@ struct StoredFeature<F> {
     /// The feature itself.
     feature: F,
 
-    /// The order of the feature.
+    /// The layer of the feature.
+    #[allow(dead_code)]
+    layer: i16,
+
+    /// The order of the feature within the layer.
     order: f64,
 
     /// The bounds of the feature.
@@ -72,10 +79,11 @@ struct StoredFeature<F> {
 
 impl<F: Feature> StoredFeature<F> {
     /// Creates a new stored feature from its components.
-    fn new(feature: F, scale: (f64, f64), order: f64) -> Self {
+    fn new(feature: F, scale: (f64, f64), layer: i16, order: f64) -> Self {
         let bounds = feature.storage_bounds();
         StoredFeature {
             feature,
+            layer,
             order,
             bounds: AABB::from_corners(
                 [scale.0 - f64::EPSILON, bounds.sw.lon, bounds.sw.lat],
@@ -133,13 +141,20 @@ impl<F> FeatureSet<F> {
     /// sorted accoring to their feature’s order.
     pub fn shape(
         &self, scale: f64, bounds: world::Rect, style: &F::Style,
+        canvas: &Canvas,
     ) -> ShapedFeatures<F::Shape<'_>>
     where F: Feature {
         let mut shapes: Vec<_> = self.features.locate_in_envelope_intersecting(
             &Self::envelope(scale, bounds)
-        ).map(|item| (item.order, item.feature.shape(style))).collect();
+        ).filter_map(|item| {
+            item.feature.shape(style, canvas).map(|shape| {
+                Shaped::new(item.layer, item.order, shape)
+            })
+        }).collect();
         shapes.sort_unstable_by(|left, right| {
-            left.0.partial_cmp(&right.0).unwrap_or(Ordering::Equal)
+            left.key().partial_cmp(
+                &right.key()
+            ).unwrap_or(Ordering::Equal)
         });
         ShapedFeatures { shapes }
     }
@@ -216,9 +231,11 @@ impl<F> FeatureSetBuilder<F> {
     ///
     /// The `order` argument defines when a feature’s shape will be rendered
     /// compared to other shapes. This can be used to layer features.
-    pub fn insert(&mut self, feature: F, scale: (f64, f64), order: f64)
+    pub fn insert(
+        &mut self, feature: F, scale: (f64, f64), layer: i16, order: f64
+    )
     where F: Feature {
-        let feature = StoredFeature::new(feature, scale, order);
+        let feature = StoredFeature::new(feature, scale, layer, order);
         if let Some(bounds) = self.bounds.as_mut() {
             bounds.merge(&feature.bounds)
         }
@@ -240,6 +257,34 @@ impl<F> FeatureSetBuilder<F> {
 }
 
 
+//------------ Shaped --------------------------------------------------------
+
+/// A single feature that has been shaped for rendering.
+pub struct Shaped<S> {
+    layer: i16,
+    order: f64,
+    shape: S,
+}
+
+impl<S> Shaped<S> {
+    fn new(layer: i16, order: f64, shape: S) -> Self {
+        Self { layer, order, shape }
+    }
+
+    fn key(&self) -> (i16, f64) {
+        (self.layer, self.order)
+    }
+
+    pub fn layer(&self) -> i16 {
+        self.layer
+    }
+
+    pub fn shape(&self) -> &S {
+        &self.shape
+    }
+}
+
+
 //------------ ShapedFeatures ------------------------------------------------
 
 /// An ordered list of shaped features.
@@ -247,20 +292,26 @@ impl<F> FeatureSetBuilder<F> {
 /// This type is returned by [`FeatureSet::shape`]. You can only iterate over
 /// it.
 pub struct ShapedFeatures<S> {
-    shapes: Vec<(f64, S)>,
+    shapes: Vec<Shaped<S>>,
 }
 
 impl<S> ShapedFeatures<S> {
-    pub fn iter(&self) -> ShapedFeaturesIter<S> {
-        ShapedFeaturesIter {
-            iter: self.shapes.iter()
-        }
+    pub fn iter(&self) -> slice::Iter<Shaped<S>> {
+        self.shapes.iter()
+    }
+
+    pub fn as_slice(&self) -> &[Shaped<S>] {
+        self.shapes.as_ref()
+    }
+
+    pub fn layer_groups(&self) -> ShapeGroupIter<S> {
+        ShapeGroupIter { slice: self.as_slice() }
     }
 }
 
 impl<'a, S> IntoIterator for &'a ShapedFeatures<S> {
-    type Item = &'a S;
-    type IntoIter = ShapedFeaturesIter<'a, S>;
+    type Item = &'a Shaped<S>;
+    type IntoIter = slice::Iter<'a, Shaped<S>>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
@@ -268,17 +319,34 @@ impl<'a, S> IntoIterator for &'a ShapedFeatures<S> {
 }
 
 
-//------------ ShapedFeaturesIter --------------------------------------------
+//------------ ShapeGroupIter -----------------------------------------------
 
-pub struct ShapedFeaturesIter<'a, S> {
-    iter: slice::Iter<'a, (f64, S)>,
+pub struct ShapeGroupIter<'a, S> {
+    slice: &'a [Shaped<S>],
 }
 
-impl<'a, S> Iterator for ShapedFeaturesIter<'a, S> {
-    type Item = &'a S;
+impl<'a, S> Iterator for ShapeGroupIter<'a, S> {
+    type Item = &'a [Shaped<S>];
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().map(|item| &item.1)
+        if self.slice.is_empty() {
+            None
+        }
+        else {
+            let mut len = 1;
+            let mut iter = self.slice.windows(2);
+            while let Some([l, r]) = iter.next() {
+                if l.layer() == r.layer() {
+                    len += 1
+                }
+                else {
+                    break
+                }
+            }
+            let (head, tail) = self.slice.split_at(len);
+            self.slice = tail;
+            Some(head)
+        }
     }
 }
 

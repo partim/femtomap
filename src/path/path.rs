@@ -428,7 +428,7 @@ impl Element {
 ///
 /// The distance consists of a value and a unit that scales this value into
 /// actual map coordinates. Since the actual factor for each unit may depend
-/// on the style, the unit depends on the theme. To avoid having the make the
+/// on the style, the unit depends on the theme. To avoid having to make the
 /// type generic over the unit, we use a simple index as a standin. This
 /// index is chosen by the theme when evaluating the map rules and is
 /// available to the style when resolving the map distance.

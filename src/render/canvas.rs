@@ -3,15 +3,15 @@
 //! This module provides the means to actually draw the map. The main type
 //! is [`Canvas`] which is used to do the actual drawing. 
 
-use std::fmt;
-use std::num::ParseIntError;
-use std::str::FromStr;
 use kurbo::{
     DEFAULT_ACCURACY, BezPath, PathEl, ParamCurve, ParamCurveArclen, PathSeg,
-    Point,
+    Point, Rect,
 };
 use crate::path::SegTime;
 use super::text::{Font, Text, TextMetrics};
+
+
+pub use super::pattern::Color;
 
 
 //------------ Canvas --------------------------------------------------------
@@ -23,13 +23,33 @@ pub struct Canvas {
     cairo: cairo::Context,
 }
 
+// XXX Cairo-specific things. 
+impl Canvas {
+    /// Creates a new canvas.
+    pub fn new(surface: &cairo::Surface) -> Self {
+        Canvas {
+            cairo: cairo::Context::new(surface).unwrap(),
+        }
+    }
+
+    /// Sets the clipping ara.
+    pub fn set_clip(&self, rect: Rect) {
+        self.cairo.move_to(rect.x0, rect.y0);
+        self.cairo.line_to(rect.x0, rect.y1);
+        self.cairo.line_to(rect.x1, rect.y1);
+        self.cairo.line_to(rect.x1, rect.y0);
+        self.cairo.close_path();
+        self.cairo.clip();
+    }
+}
+
 impl Canvas {
     pub fn start(&mut self) -> Group {
         Group::new(self)
     }
 
     pub fn prepare_text<'a>(
-        &self, text: &'a str, font: &'a Font
+        &self, text: &'a str, font: Font
     ) -> Text<'a> {
         Text::prepare(text, font)
     }
@@ -59,7 +79,7 @@ impl<'a> Group<'a> {
         Group::new(self.canvas)
     }
 
-    fn cairo(&self) -> &cairo::Context {
+    pub(super) fn cairo(&self) -> &cairo::Context {
         &self.canvas.cairo
     }
 }
@@ -67,74 +87,21 @@ impl<'a> Group<'a> {
 /// # Change Style Parameters
 ///
 impl<'a> Group<'a> {
-    /// Changes the style for strokes and fills to use the given color.
-    pub fn apply_color(&mut self, color: Color) {
-        self.cairo().set_source_rgba(
-            color.red, color.green, color.blue, color.alpha
-        )
-    }
-
-    /// Changes the dash pattern to be used.
-    ///
-    /// Dashing is off by default.
-    pub fn apply_dash<const N: usize>(&mut self, pattern: DashPattern<N>) {
-        self.cairo().set_dash(&pattern.dashes, pattern.offset)
-    }
-
-    /// Changes the line cap to be used.
-    ///
-    /// The default cap is [`LineCap::Butt`].
-    pub fn apply_line_cap(&mut self, cap: LineCap) {
-        self.cairo().set_line_cap(
-            match cap {
-                LineCap::Butt => cairo::LineCap::Butt,
-                LineCap::Round => cairo::LineCap::Round,
-                LineCap::Square => cairo::LineCap::Square,
-            }
-        );
-    }
-
-    /// Changes the line join to be used.
-    ///
-    /// The default join is [`LineJoin::Miter(10.)`].
-    pub fn apply_line_join(&mut self, join: LineJoin) {
-        match join {
-            LineJoin::Miter(limit) => {
-                self.cairo().set_line_join(cairo::LineJoin::Miter);
-                self.cairo().set_miter_limit(limit);
-            }
-            LineJoin::Round => {
-                self.cairo().set_line_join(cairo::LineJoin::Round);
-            }
-            LineJoin::Bevel => {
-                self.cairo().set_line_join(cairo::LineJoin::Bevel);
-            }
-        }
+    pub fn apply(&mut self, property: impl Property) {
+        property.apply_to_group(self);
     }
 
     /// Changes the width of a stroked line.
     pub fn apply_line_width(&mut self, width: f64) {
         self.cairo().set_line_width(width)
     }
-
-    /// Changes the compositing operator.
-    ///
-    /// The default operator is [`Operator::SourceOver`]
-    pub fn apply_operator(&mut self, operator: Operator) {
-        self.cairo().set_operator(
-            match operator {
-                Operator::SourceOver => cairo::Operator::Over,
-                Operator::DestinationOut => cairo::Operator::DestOut,
-            }
-        );
-    }
 }
 
-/// # Drawing Paths
+/// # Drawing with outlines
 ///
 impl<'a> Group<'a> {
     /// Applies a path.
-    pub fn apply_path(&mut self, path: impl IntoIterator<Item = PathEl>) {
+    pub fn apply_outline(&mut self, path: impl IntoIterator<Item = PathEl>) {
         self.cairo().new_path();
         path.into_iter().for_each(|el| match el {
             PathEl::MoveTo(p) => self.cairo().move_to(p.x, p.y),
@@ -162,6 +129,38 @@ impl<'a> Group<'a> {
     }
 }
 
+/// # Temporary: Build outlines step by step.
+///
+impl<'a> Group<'a> {
+    pub fn new_path(&mut self) {
+        self.cairo().new_path()
+    }
+
+    pub fn move_to(&mut self, x: f64, y: f64) {
+        self.cairo().move_to(x, y)
+    }
+
+    pub fn line_to(&mut self, x: f64, y: f64) {
+        self.cairo().line_to(x, y)
+    }
+
+    pub fn curve_to(
+        &mut self, x1: f64, y1: f64, x2: f64, y2: f64, x3: f64, y3: f64
+    ) {
+        self.cairo().curve_to(x1, y1, x2, y2, x3, y3)
+    }
+
+    pub fn arc(
+        &mut self, xc: f64, yc: f64, radius: f64, angle1: f64, angle2: f64
+    ) {
+        self.cairo().arc(xc, yc, radius, angle1, angle2)
+    }
+
+    pub fn close_path(&mut self) {
+        self.cairo().close_path()
+    }
+}
+
 /// # Drawing Text
 ///
 impl<'a> Group<'a> {
@@ -183,112 +182,41 @@ impl<'a> Group<'a> {
 impl<'a> Drop for Group<'a> {
     fn drop(&mut self) {
         self.canvas.cairo.restore().expect("cairo_restore failed");
+        self.canvas.cairo.new_path();
     }
 }
 
 
-//------------ Color ---------------------------------------------------------
+//------------ Property ------------------------------------------------------
 
-/// A color.
-#[derive(Clone, Copy, Debug, Default)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Deserialize, serde::Serialize),
-    serde(try_from = "String"))
-]
-pub struct Color {
-    red: f64,
-    green: f64,
-    blue: f64,
-    alpha: f64
+pub trait Property {
+    fn apply_to_group(self, group: &mut Group);
 }
 
-impl Color {
-    pub const fn rgb(red: f64, green: f64, blue: f64) -> Self {
-        Color { red, green, blue, alpha: 1. }
-    }
-
-    pub const fn rgba(red: f64, green: f64, blue: f64, alpha: f64) -> Self {
-        Color { red, green, blue, alpha }
-    }
-
-    pub const fn grey(level: f64) -> Self {
-        Color::rgb(level, level, level)
-    }
-
-    pub fn hex(mut hex: &str) -> Result<Self, InvalidHexColor> {
-        if hex.starts_with('#') {
-            hex = &hex[1..];
-        }
-        let (r, g, b, a) = if hex.len() == 6 {
-            (
-                u8::from_str_radix(&hex[0..2], 16)?,
-                u8::from_str_radix(&hex[2..4], 16)?,
-                u8::from_str_radix(&hex[4..6], 16)?,
-                0xFF,
-            )
-        }
-        else if hex.len() == 8 {
-            (
-                u8::from_str_radix(&hex[0..2], 16)?,
-                u8::from_str_radix(&hex[2..4], 16)?,
-                u8::from_str_radix(&hex[4..6], 16)?,
-                u8::from_str_radix(&hex[6..8], 16)?,
-            )
-        }
-        else {
-            return Err(InvalidHexColor)
-        };
-        Ok(Color::rgba(
-            r as f64 / 255.,
-            g as f64 / 255.,
-            b as f64 / 255.,
-            a as f64 / 255.,
-        ))
-    }
-
-    pub fn apply(self, target: &mut Group) {
-        target.apply_color(self)
-    }
-
-    pub fn with_alpha(self, alpha: f64) -> Self {
-        Color { red: self.red, green: self.green, blue: self.blue, alpha }
-    }
-
-    pub fn lighten(self, factor: f64) -> Self {
-        fn component(x: f64, factor: f64) -> f64 {
-            x * factor + 1. - factor
-        }
-
-        Color {
-            red: component(self.red, factor),
-            green: component(self.green, factor),
-            blue: component(self.blue, factor),
-            alpha: self.alpha
-        }
+impl<'a> Property for &'a BezPath {
+    fn apply_to_group(self, group: &mut Group) {
+        group.cairo().new_path();
+        self.iter().for_each(|el| match el {
+            PathEl::MoveTo(p) => group.cairo().move_to(p.x, p.y),
+            PathEl::LineTo(p) => group.cairo().line_to(p.x, p.y),
+            PathEl::QuadTo(..) => unreachable!(),
+            PathEl::CurveTo(u, v, s) => {
+                group.cairo().curve_to(u.x, u.y, v.x, v.y, s.x, s.y)
+            }
+            PathEl::ClosePath => group.cairo().close_path(),
+        })
     }
 }
 
-impl Color {
-    pub const WHITE: Color = Color::rgb(1., 1., 1.);
-    pub const BLACK: Color = Color::rgb(0., 0., 0.);
-    pub const RED: Color = Color::rgb(1., 0., 0.);
-    pub const TRANSPARENT: Color = Color::rgba(0., 0., 0., 0.);
-}
-
-impl TryFrom<String> for Color {
-    type Error = InvalidHexColor;
-
-    fn try_from(src: String) -> Result<Self, Self::Error> {
-        Self::hex(&src)
-    }
-}
-
-impl FromStr for Color {
-    type Err = InvalidHexColor;
-
-    fn from_str(src: &str) -> Result<Self, Self::Err> {
-        Self::hex(src)
+impl Property for Rect {
+    fn apply_to_group(self, group: &mut Group) {
+        let cairo = group.cairo();
+        cairo.new_path();
+        cairo.move_to(self.x0, self.y0);
+        cairo.line_to(self.x0, self.y1);
+        cairo.line_to(self.x1, self.y1);
+        cairo.line_to(self.x1, self.y0);
+        cairo.close_path();
     }
 }
 
@@ -302,13 +230,21 @@ pub struct DashPattern<const N: usize> {
     offset: f64
 }
 
+impl DashPattern<0> {
+    pub const fn empty() -> Self {
+        Self::new([], 0.)
+    }
+}
+
 impl<const N: usize> DashPattern<N> {
-    pub fn new(dashes: [f64; N], offset: f64) -> Self {
+    pub const fn new(dashes: [f64; N], offset: f64) -> Self {
         Self { dashes, offset }
     }
+}
 
-    pub fn apply(self, canvas: &mut Group) {
-        canvas.apply_dash(self)
+impl<const N: usize> Property for DashPattern<N> {
+    fn apply_to_group(self, group: &mut Group) {
+        group.cairo().set_dash(&self.dashes, self.offset)
     }
 }
 
@@ -330,12 +266,17 @@ pub enum LineCap {
     Square,
 }
 
-impl LineCap {
-    pub fn apply(self, canvas: &mut Group) {
-        canvas.apply_line_cap(self);
+impl Property for LineCap {
+    fn apply_to_group(self, group: &mut Group) {
+        group.cairo().set_line_cap(
+            match self {
+                LineCap::Butt => cairo::LineCap::Butt,
+                LineCap::Round => cairo::LineCap::Round,
+                LineCap::Square => cairo::LineCap::Square,
+            }
+        );
     }
 }
-
 
 
 //------------ LineJoin ------------------------------------------------------
@@ -365,9 +306,20 @@ impl Default for LineJoin {
     }
 }
 
-impl LineJoin {
-    pub fn apply(self, canvas: &mut Group) {
-        canvas.apply_line_join(self);
+impl Property for LineJoin {
+    fn apply_to_group(self, group: &mut Group) {
+        match self {
+            LineJoin::Miter(limit) => {
+                group.cairo().set_line_join(cairo::LineJoin::Miter);
+                group.cairo().set_miter_limit(limit);
+            }
+            LineJoin::Round => {
+                group.cairo().set_line_join(cairo::LineJoin::Round);
+            }
+            LineJoin::Bevel => {
+                group.cairo().set_line_join(cairo::LineJoin::Bevel);
+            }
+        }
     }
 }
 
@@ -386,12 +338,50 @@ pub enum Operator {
     DestinationOut,
 }
 
-impl Operator {
-    pub fn apply(self, canvas: &mut Group) {
-        canvas.apply_operator(self);
+impl Property for Operator {
+    fn apply_to_group(self, group: &mut Group) {
+        group.cairo().set_operator(
+            match self {
+                Operator::SourceOver => cairo::Operator::Over,
+                Operator::DestinationOut => cairo::Operator::DestOut,
+            }
+        );
     }
 }
 
+//------------ Matrix --------------------------------------------------------
+
+/// The transformation matrix for points on the canvas.
+#[derive(Clone, Copy, Debug)]
+pub struct Matrix {
+    cairo: cairo::Matrix
+}
+
+impl Matrix {
+    pub fn identity() -> Self {
+        Matrix { cairo: cairo::Matrix::identity() }
+    }
+
+    fn convert(self, op: impl FnOnce(&mut cairo::Matrix)) -> Self {
+        let mut res = self.clone();
+        op(&mut res.cairo);
+        res
+    }
+
+    pub fn translate(self, point: Point) -> Self {
+        self.convert(|res| res.translate(point.x, point.y))
+    }
+
+    pub fn rotate(self, angle: f64) -> Self {
+        self.convert(|res| res.rotate(angle))
+    }
+}
+
+impl Property for Matrix {
+    fn apply_to_group(self, group: &mut Group) {
+        group.cairo().set_matrix(self.cairo);
+    }
+}
 
 
 //------------ Path ----------------------------------------------------------
@@ -450,7 +440,7 @@ impl Path {
     }
 
     pub fn apply(&self, canvas: &mut  Group) {
-        canvas.apply_path(self)
+        canvas.apply_outline(self)
     }
 }
 
@@ -606,26 +596,6 @@ fn first_point(seg: PathSeg) -> Point {
         PathSeg::Line(line) => line.p0,
         PathSeg::Quad(..) => unreachable!(),
         PathSeg::Cubic(cubic) => cubic.p0
-    }
-}
-
-
-//============ Error Types ===================================================
-
-//------------ InvalidHexColor -----------------------------------------------
-
-#[derive(Debug)]
-pub struct InvalidHexColor;
-
-impl From<ParseIntError> for InvalidHexColor {
-    fn from(_: ParseIntError) -> Self {
-        InvalidHexColor
-    }
-}
-
-impl fmt::Display for InvalidHexColor {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("invalid color")
     }
 }
 

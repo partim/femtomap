@@ -1,22 +1,23 @@
 use std::borrow::Cow;
-use kurbo::Point;
+use kurbo::{Point, Rect};
 
 
 //------------ Text ----------------------------------------------------------
 
 /// A line of text prepared for rendering onto a canvas.
+#[derive(Clone, Debug)]
 pub struct Text<'a> {
     text: &'a str,
-    font: &'a cairo::ScaledFont,
+    font: cairo::ScaledFont,
 }
 
 impl<'a> Text<'a> {
-    pub(super) fn prepare(text: &'a str, font: &'a Font) -> Self {
-        Text { text, font: &font.font }
+    pub(super) fn prepare(text: &'a str, font: Font) -> Self {
+        Text { text, font: font.font }
     }
 
     pub(super) fn text_metrics(&self, cairo: &cairo::Context) -> TextMetrics {
-        cairo.set_scaled_font(self.font);
+        cairo.set_scaled_font(&self.font);
         TextMetrics::from_cairo(cairo, self.text)
     }
 
@@ -30,10 +31,9 @@ impl<'a> Text<'a> {
         cairo.stroke().expect("cairo_stroke failed");
     }
 
-
     /// Sets the font styles for text rendering.
     fn prepare_text(&self, cairo: &cairo::Context, at: Point) {
-        cairo.set_scaled_font(self.font);
+        cairo.set_scaled_font(&self.font);
         cairo.new_path();
         cairo.move_to(at.x, at.y);
         cairo.text_path(self.text);
@@ -58,7 +58,24 @@ impl TextMetrics {
     }
 
     pub fn advance(&self) -> Point {
-        Point::new(self.text.x_bearing(), self.text.y_bearing())
+        Point::new(self.text.x_advance(), self.text.y_advance())
+    }
+
+    pub fn inked(&self) -> Rect {
+        Rect::new(
+            self.text.x_bearing(),
+            self.text.y_bearing(),
+            self.text.width() + self.text.x_bearing(),
+            self.text.height() + self.text.y_bearing(),
+        )
+    }
+
+    pub fn ascent(&self) -> f64 {
+        self.font.ascent()
+    }
+
+    pub fn descent(&self) -> f64 {
+        self.font.descent()
     }
 
     pub fn line_height(&self) -> f64 {
@@ -70,6 +87,7 @@ impl TextMetrics {
 //------------ Font ----------------------------------------------------------
 
 /// Description of a font.
+#[derive(Clone, Debug)]
 pub struct Font {
     font: cairo::ScaledFont,
 }
@@ -129,6 +147,31 @@ impl FontBuilder {
         self
     }
 
+    /// Takes unset fields from a different value.
+    pub fn update(&mut self, other: &Self) {
+        if self.family.is_none() {
+            self.family = other.family.clone()
+        }
+        if self.size.is_none() {
+            self.size = other.size;
+        }
+        if self.features.is_none() {
+            self.features = other.features.clone();
+        }
+        if self.stretch.is_none() {
+            self.stretch = other.stretch;
+        }
+        if self.style.is_none() {
+            self.style = other.style;
+        }
+        if self.variant.is_none() {
+            self.variant = other.variant;
+        }
+        if self.weight.is_none() {
+            self.weight = other.weight;
+        }
+    }
+
     pub fn finalize(self) -> Font {
         let mut matrix = cairo::Matrix::identity();
         let size = self.size.unwrap_or(12.);
@@ -166,7 +209,7 @@ pub struct FontFamily {
 }
 
 impl FontFamily {
-    pub fn from_static(name: &'static str) -> Self {
+    pub const fn from_static(name: &'static str) -> Self {
         FontFamily {
             family: Cow::Borrowed(name)
         }

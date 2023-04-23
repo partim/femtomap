@@ -4,8 +4,8 @@
 use std::{cmp, iter, slice};
 use std::f64::consts::PI;
 use kurbo::{
-    DEFAULT_ACCURACY, CubicBez, Line, Rect, ParamCurve, ParamCurveArclen,
-    ParamCurveExtrema, PathEl, Point, Vec2
+    DEFAULT_ACCURACY, BezPath, CubicBez, Line, Rect, ParamCurve,
+    ParamCurveArclen, ParamCurveExtrema, PathEl, Point, Vec2
 };
 use crate::mp_path::velocity;
 use crate::render::canvas;
@@ -57,22 +57,29 @@ impl Trace {
         self.parts.extend_from_slice(&trace.parts[1..]);
     }
 
+    pub fn outline(&self, style: &impl Style) -> BezPath {
+        BezPath::from_iter(self.elements(style))
+    }
+
+    pub fn outline_offset(&self, offset: f64, style: &impl Style) -> BezPath {
+        BezPath::from_iter(self.offset_elements(offset, style))
+    }
+
     pub fn apply(&self, canvas: &mut canvas::Group, style: &impl Style) {
-        canvas.apply_path(self.elements(style))
+        canvas.apply_outline(self.elements(style))
     }
 
     pub fn apply_offset(
         &self, offset: f64, canvas: &mut canvas::Group, style: &impl Style,
     ) {
-        canvas.apply_path(self.offset_elements(offset, style))
+        canvas.apply_outline(self.offset_elements(offset, style))
     }
 
     pub fn elements<'s>(
         &'s self, style: &'s impl Style
     ) -> impl Iterator<Item = PathEl> + 's {
-        let mut segments = self.segments(style);
-        let seg = segments.next().unwrap();
-        iter::once(seg.start_element()).chain(
+        let mut segments = self.segments(style).peekable();
+        iter::once(segments.peek().unwrap().start_element()).chain(
             segments.map(|seg| seg.tail_element())
         )
     }
@@ -80,9 +87,10 @@ impl Trace {
     pub fn offset_elements<'s>(
         &'s self, offset: f64, style: &'s impl Style
     ) -> impl Iterator<Item = PathEl> + 's {
-        let mut segments = self.segments(style);
-        let seg = segments.next().unwrap().offset(offset);
-        iter::once(seg.start_element()).chain(
+        let mut segments = self.segments(style).peekable();
+        iter::once(
+            segments.peek().unwrap().offset(offset).start_element()
+        ).chain(
             segments.map(move |seg| seg.offset(offset).tail_element())
         )
     }
