@@ -7,7 +7,7 @@ edition = "2021"
 [dependencies]
 cairo-rs = { version = "0.17", features = ["png", "svg", "v1_16"] }
 kurbo    = "0.9.0"
-pango = { version = "0.17", features = ["v1_50"] }
+pango = { version = "0.17", features = ["v1_42"] }
 pangocairo = { version = "0.17" }
 rstar    = "0.10"
 serde    = { version = "1", features = ["derive"], optional = true }

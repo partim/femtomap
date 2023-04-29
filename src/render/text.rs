@@ -123,7 +123,6 @@ pub struct FontBuilder {
     family: Option<FontFamily>,
     size: Option<f64>,
     features: Option<FontFeatures>,
-    line_height: Option<f64>,
     stretch: Option<FontStretch>,
     style: Option<FontStyle>,
     variant: Option<FontVariant>,
@@ -147,11 +146,6 @@ impl FontBuilder {
 
     pub fn features(mut self, features: FontFeatures) -> Self {
         self.features = Some(features);
-        self
-    }
-
-    pub fn line_height(mut self, line_height: f64) -> Self {
-        self.line_height = Some(line_height);
         self
     }
 
@@ -185,9 +179,6 @@ impl FontBuilder {
         }
         if self.features.is_none() {
             self.features = other.features.clone();
-        }
-        if self.line_height.is_none() {
-            self.line_height = other.line_height
         }
         if self.stretch.is_none() {
             self.stretch = other.stretch;
@@ -226,9 +217,6 @@ impl FontBuilder {
 
         let attrs = pango::AttrList::new();
         attrs.insert(pango::AttrFontDesc::new(&descr));
-        if let Some(line_height) = self.line_height {
-            attrs.insert(pango::AttrFloat::new_line_height(line_height));
-        }
         if let Some(features) = self.features.as_ref() {
             attrs.insert(
                 pango::AttrFontFeatures::new(features.features.as_ref())
