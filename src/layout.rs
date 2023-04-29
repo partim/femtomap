@@ -1,8 +1,7 @@
 //! Complex text arrangements.
 
 use kurbo::{Rect, Vec2};
-use crate::render::canvas::{Canvas, Group};
-use crate::render::text::{Font, Text};
+use crate::render::{Canvas, Font, Sketch, Text};
 
 
 //------------ Block ---------------------------------------------------------
@@ -558,7 +557,7 @@ pub trait Properties: Sized {
         style: &Self::Style,
         base: Vec2,
         stage: &Self::Stage,
-        canvas: &mut Group
+        canvas: &mut Sketch,
     );
 }
 
@@ -702,7 +701,7 @@ impl<'a, P> ShapedLayout<'a, P> {
     pub fn render(
         &self, style: &P::Style,
         base: Vec2, stage: &P::Stage,
-        canvas: &mut Group
+        canvas: &mut Sketch,
     )
     where P: Properties {
         self.properties.render(self, style, base, stage, canvas);
@@ -721,24 +720,24 @@ impl<'a, P> ShapedLayout<'a, P> {
         self.frame.is_some()
     }
 
-    pub fn fill_text(&self, base: Vec2, canvas: &mut Group) {
+    pub fn fill_text(&self, base: Vec2, canvas: &mut Sketch) {
         if let Shape::Span { ref text } = self.shape {
             canvas.fill_text(text, (base + self.offset).to_point());
         }
     }
 
-    pub fn stroke_text(&self, base: Vec2, canvas: &mut Group) {
+    pub fn stroke_text(&self, base: Vec2, canvas: &mut Sketch) {
         if let Shape::Span { ref text } = self.shape {
             canvas.stroke_text(text, (base + self.offset).to_point());
         }
     }
 
-    pub fn fill_background(&self, base: Vec2, canvas: &mut Group) {
+    pub fn fill_background(&self, base: Vec2, canvas: &mut Sketch) {
         canvas.apply(self.inner + base + self.offset);
         canvas.fill();
     }
 
-    pub fn fill_frame(&self, base: Vec2, canvas: &mut Group) {
+    pub fn fill_frame(&self, base: Vec2, canvas: &mut Sketch) {
         if let Some(frame) = self.frame {
             canvas.apply(frame + base + self.offset);
             let inner = self.inner + base + self.offset;

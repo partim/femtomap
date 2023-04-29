@@ -1,17 +1,12 @@
 //! Drawing the map.
-//!
-//! This module provides the means to actually draw the map. The main type
-//! is [`Canvas`] which is used to do the actual drawing. 
 
 use kurbo::{
     DEFAULT_ACCURACY, BezPath, PathEl, ParamCurve, ParamCurveArclen, PathSeg,
-    Point, Rect,
+    Point, Rect, Shape,
 };
 use crate::path::SegTime;
+use super::outline::OutlineIter;
 use super::text::{Font, Text, TextMetrics};
-
-
-pub use super::pattern::Color;
 
 
 //------------ Canvas --------------------------------------------------------
@@ -48,8 +43,8 @@ impl Canvas {
 }
 
 impl Canvas {
-    pub fn start(&mut self) -> Group {
-        Group::new(self)
+    pub fn sketch(&mut self) -> Sketch {
+        Sketch::new(self)
     }
 
     pub fn prepare_text<'a>(
@@ -64,62 +59,83 @@ impl Canvas {
         text.text_metrics()
     }
 
+    pub(super) fn cairo(&self) -> &cairo::Context {
+        &self.cairo
+    }
+
     pub(super) fn pango(&self) -> &pango::Context {
         &self.pango
     }
 }
 
 
-//------------ Group ---------------------------------------------------------
+//------------ Sketch --------------------------------------------------------
 
+/// A sketch with an outline applied to it.
 #[derive(Debug)]
-pub struct Group<'a> {
+pub struct Sketch<'a> {
     canvas: &'a Canvas,
+
+    matrix: bool,
+    line_cap: bool,
+    line_join: bool,
+    operator: bool,
+    dash: bool,
 }
 
-impl<'a> Group<'a> {
+impl<'a> Sketch<'a> {
     fn new(canvas: &'a Canvas) -> Self {
-        canvas.cairo.save().expect("cairo_save failed");
-        Self { canvas }
-    }
-
-    pub fn start(&mut self) -> Group {
-        Group::new(self.canvas)
+        Self {
+            canvas,
+            matrix: false,
+            line_cap: false,
+            line_join: false,
+            operator: false,
+            dash: false,
+        }
     }
 
     pub(super) fn cairo(&self) -> &cairo::Context {
-        &self.canvas.cairo
+        self.canvas.cairo()
+    }
+
+    pub fn into_group(self) -> Group<'a> {
+        Group::new(self)
     }
 }
 
-/// # Change Style Parameters
-///
-impl<'a> Group<'a> {
-    pub fn apply(&mut self, property: impl Property) {
-        property.apply_to_group(self);
-    }
-
-    /// Changes the width of a stroked line.
-    pub fn apply_line_width(&mut self, width: f64) {
-        self.cairo().set_line_width(width)
+impl<'a> Drop for Sketch<'a> {
+    fn drop(&mut self) {
+        if self.matrix{
+            self.cairo().identity_matrix();
+        }
+        if self.line_cap {
+            self.cairo().set_line_cap(LineCap::default().to_cairo());
+        }
+        if self.line_join {
+            self.cairo().set_line_join(cairo::LineJoin::Miter);
+            self.cairo().set_miter_limit(10.);
+        }
+        if self.operator {
+            self.cairo().set_operator(Operator::default().to_cairo());
+        }
+        if self.dash {
+            self.cairo().set_dash(&[], 0.);
+        }
     }
 }
 
-/// # Drawing with outlines
-///
-impl<'a> Group<'a> {
-    /// Applies a path.
-    pub fn apply_outline(&mut self, path: impl IntoIterator<Item = PathEl>) {
-        self.cairo().new_path();
-        path.into_iter().for_each(|el| match el {
-            PathEl::MoveTo(p) => self.cairo().move_to(p.x, p.y),
-            PathEl::LineTo(p) => self.cairo().line_to(p.x, p.y),
-            PathEl::QuadTo(..) => unreachable!(),
-            PathEl::CurveTo(u, v, s) => {
-                self.cairo().curve_to(u.x, u.y, v.x, v.y, s.x, s.y)
-            }
-            PathEl::ClosePath => self.cairo().close_path(),
-        })
+impl<'a> Sketch<'a> {
+    pub fn group(&mut self) -> Self {
+        Sketch::new(self.canvas)
+    }
+
+    /// Apply a property to the sketch.
+    pub fn apply(
+        &mut self, property: impl SketchProperty
+    ) -> &mut Self {
+        property.apply_to_sketch(self);
+        self
     }
 
     /// Fills the currently applied path.
@@ -135,11 +151,49 @@ impl<'a> Group<'a> {
     pub fn stroke(&mut self) {
         self.cairo().stroke_preserve().expect("cairo_stroke_preserve failed");
     }
+
+    /// Fills the given text at the given position.
+    ///
+    /// Note that this does clear the currently applied path.
+    pub fn fill_text(&mut self, text: &Text, at: Point) {
+        text.fill(self.cairo(), at)
+    }
+
+    /// Strokes the given text at the given position.
+    ///
+    /// Note that this does clear the currently applied path.
+    pub fn stroke_text(&mut self, text: &Text, at: Point) {
+        text.stroke(self.cairo(), at)
+    }
 }
 
-/// # Temporary: Build outlines step by step.
-///
+
+//------------ Group ---------------------------------------------------------
+
+#[derive(Debug)]
+pub struct Group<'a> {
+    sketch: Sketch<'a>,
+}
+
 impl<'a> Group<'a> {
+    fn new(sketch: Sketch<'a>) -> Self {
+        sketch.cairo().new_path();
+        Self { sketch }
+    }
+
+    fn cairo(&self) -> &cairo::Context {
+        self.sketch.cairo()
+    }
+}
+
+impl<'a> Group<'a> {
+    pub fn apply(&mut self, property: impl SketchProperty) {
+        property.apply_to_sketch(&mut self.sketch);
+    }
+
+    pub fn apply_line_width(&mut self, width: f64) {
+        LineWidth(width).apply_to_sketch(&mut self.sketch);
+    }
     pub fn new_path(&mut self) {
         self.cairo().new_path()
     }
@@ -167,11 +221,34 @@ impl<'a> Group<'a> {
     pub fn close_path(&mut self) {
         self.cairo().close_path()
     }
-}
 
-/// # Drawing Text
-///
-impl<'a> Group<'a> {
+    pub fn apply_outline(&mut self, path: impl IntoIterator<Item = PathEl>) {
+        self.cairo().new_path();
+        path.into_iter().for_each(|el| match el {
+            PathEl::MoveTo(p) => self.cairo().move_to(p.x, p.y),
+            PathEl::LineTo(p) => self.cairo().line_to(p.x, p.y),
+            PathEl::QuadTo(..) => unreachable!(),
+            PathEl::CurveTo(u, v, s) => {
+                self.cairo().curve_to(u.x, u.y, v.x, v.y, s.x, s.y)
+            }
+            PathEl::ClosePath => self.cairo().close_path(),
+        })
+    }
+
+    /// Fills the currently applied path.
+    ///
+    /// Note that this does not clear the currently applied path.
+    pub fn fill(&mut self) {
+        self.cairo().fill_preserve().expect("cairo_fill_preserve failed");
+    }
+
+    /// Strokes the currently applied path.
+    ///
+    /// Note that this does not clear the currently applied path.
+    pub fn stroke(&mut self) {
+        self.cairo().stroke_preserve().expect("cairo_stroke_preserve failed");
+    }
+
     /// Fills the given text at the given position.
     ///
     /// Note that this does clear the currently applied path.
@@ -187,37 +264,21 @@ impl<'a> Group<'a> {
     }
 }
 
-impl<'a> Drop for Group<'a> {
-    fn drop(&mut self) {
-        self.canvas.cairo.restore().expect("cairo_restore failed");
-        self.canvas.cairo.new_path();
+
+//------------ SketchProperty -----------------------------------------------
+
+pub trait SketchProperty {
+    fn apply_to_sketch(self, sketch: &mut Sketch);
+}
+
+impl<'a> SketchProperty for &'a BezPath {
+    fn apply_to_sketch(self, group: &mut Sketch) {
+        OutlineIter(self).apply_to_sketch(group);
     }
 }
 
-
-//------------ Property ------------------------------------------------------
-
-pub trait Property {
-    fn apply_to_group(self, group: &mut Group);
-}
-
-impl<'a> Property for &'a BezPath {
-    fn apply_to_group(self, group: &mut Group) {
-        group.cairo().new_path();
-        self.iter().for_each(|el| match el {
-            PathEl::MoveTo(p) => group.cairo().move_to(p.x, p.y),
-            PathEl::LineTo(p) => group.cairo().line_to(p.x, p.y),
-            PathEl::QuadTo(..) => unreachable!(),
-            PathEl::CurveTo(u, v, s) => {
-                group.cairo().curve_to(u.x, u.y, v.x, v.y, s.x, s.y)
-            }
-            PathEl::ClosePath => group.cairo().close_path(),
-        })
-    }
-}
-
-impl Property for Rect {
-    fn apply_to_group(self, group: &mut Group) {
+impl SketchProperty for Rect {
+    fn apply_to_sketch(self, group: &mut Sketch) {
         let cairo = group.cairo();
         cairo.new_path();
         cairo.move_to(self.x0, self.y0);
@@ -227,6 +288,13 @@ impl Property for Rect {
         cairo.close_path();
     }
 }
+
+impl SketchProperty for kurbo::Circle {
+    fn apply_to_sketch(self, group: &mut Sketch) {
+        OutlineIter(self.path_elements(0.1)).apply_to_sketch(group);
+    }
+}
+
 
 
 //------------ DashPattern ---------------------------------------------------
@@ -250,9 +318,10 @@ impl<const N: usize> DashPattern<N> {
     }
 }
 
-impl<const N: usize> Property for DashPattern<N> {
-    fn apply_to_group(self, group: &mut Group) {
-        group.cairo().set_dash(&self.dashes, self.offset)
+impl<const N: usize> SketchProperty for DashPattern<N> {
+    fn apply_to_sketch(self, group: &mut Sketch) {
+        group.cairo().set_dash(&self.dashes, self.offset);
+        group.dash = true;
     }
 }
 
@@ -274,15 +343,20 @@ pub enum LineCap {
     Square,
 }
 
-impl Property for LineCap {
-    fn apply_to_group(self, group: &mut Group) {
-        group.cairo().set_line_cap(
-            match self {
-                LineCap::Butt => cairo::LineCap::Butt,
-                LineCap::Round => cairo::LineCap::Round,
-                LineCap::Square => cairo::LineCap::Square,
-            }
-        );
+impl LineCap {
+    fn to_cairo(self) -> cairo::LineCap {
+        match self {
+            LineCap::Butt => cairo::LineCap::Butt,
+            LineCap::Round => cairo::LineCap::Round,
+            LineCap::Square => cairo::LineCap::Square,
+        }
+    }
+}
+
+impl SketchProperty for LineCap {
+    fn apply_to_sketch(self, sketch: &mut Sketch) {
+        sketch.cairo().set_line_cap(self.to_cairo());
+        sketch.line_cap = true;
     }
 }
 
@@ -314,8 +388,8 @@ impl Default for LineJoin {
     }
 }
 
-impl Property for LineJoin {
-    fn apply_to_group(self, group: &mut Group) {
+impl SketchProperty for LineJoin {
+    fn apply_to_sketch(self, group: &mut Sketch) {
         match self {
             LineJoin::Miter(limit) => {
                 group.cairo().set_line_join(cairo::LineJoin::Miter);
@@ -328,34 +402,22 @@ impl Property for LineJoin {
                 group.cairo().set_line_join(cairo::LineJoin::Bevel);
             }
         }
+        group.line_join = true;
     }
 }
 
 
-//------------ Operator ------------------------------------------------------
+//------------ LineWidth -----------------------------------------------------
 
-/// The compositing operator to be used when drawing new content.
-#[derive(Clone, Copy, Debug, Default)]
-#[non_exhaustive]
-pub enum Operator {
-    /// Draws the source over the existing content.
-    #[default]
-    SourceOver,
+#[derive(Clone, Copy, Debug)]
+pub struct LineWidth(pub f64);
 
-    /// Existing content is kept where it doesn't overlap the new content.
-    DestinationOut,
-}
-
-impl Property for Operator {
-    fn apply_to_group(self, group: &mut Group) {
-        group.cairo().set_operator(
-            match self {
-                Operator::SourceOver => cairo::Operator::Over,
-                Operator::DestinationOut => cairo::Operator::DestOut,
-            }
-        );
+impl SketchProperty for LineWidth {
+    fn apply_to_sketch(self, sketch: &mut Sketch) {
+        sketch.cairo().set_line_width(self.0);
     }
 }
+
 
 //------------ Matrix --------------------------------------------------------
 
@@ -385,9 +447,41 @@ impl Matrix {
     }
 }
 
-impl Property for Matrix {
-    fn apply_to_group(self, group: &mut Group) {
+impl SketchProperty for Matrix {
+    fn apply_to_sketch(self, group: &mut Sketch) {
         group.cairo().set_matrix(self.cairo);
+        group.matrix = true;
+    }
+}
+
+
+//------------ Operator ------------------------------------------------------
+
+/// The compositing operator to be used when drawing new content.
+#[derive(Clone, Copy, Debug, Default)]
+#[non_exhaustive]
+pub enum Operator {
+    /// Draws the source over the existing content.
+    #[default]
+    SourceOver,
+
+    /// Existing content is kept where it doesn't overlap the new content.
+    DestinationOut,
+}
+
+impl Operator {
+    fn to_cairo(self) -> cairo::Operator {
+        match self {
+            Operator::SourceOver => cairo::Operator::Over,
+            Operator::DestinationOut => cairo::Operator::DestOut,
+        }
+    }
+}
+
+impl SketchProperty for Operator {
+    fn apply_to_sketch(self, group: &mut Sketch) {
+        group.cairo().set_operator(self.to_cairo());
+        group.operator = true;
     }
 }
 

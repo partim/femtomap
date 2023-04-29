@@ -8,7 +8,7 @@ use kurbo::{
     ParamCurveArclen, ParamCurveExtrema, PathEl, Point, Vec2
 };
 use crate::mp_path::velocity;
-use crate::render::canvas;
+use crate::render::outline::{Outline, OutlineIter};
 use super::path::{Distance, Location, SegTime, Style, Path};
 
 
@@ -57,22 +57,24 @@ impl Trace {
         self.parts.extend_from_slice(&trace.parts[1..]);
     }
 
-    pub fn outline(&self, style: &impl Style) -> BezPath {
-        BezPath::from_iter(self.elements(style))
+    pub fn outline(&self, style: &impl Style) -> Outline {
+        BezPath::from_iter(self.elements(style)).into()
     }
 
-    pub fn outline_offset(&self, offset: f64, style: &impl Style) -> BezPath {
-        BezPath::from_iter(self.offset_elements(offset, style))
+    pub fn outline_offset(&self, offset: f64, style: &impl Style) -> Outline {
+        BezPath::from_iter(self.offset_elements(offset, style)).into()
     }
 
-    pub fn apply(&self, canvas: &mut canvas::Group, style: &impl Style) {
-        canvas.apply_outline(self.elements(style))
+    pub fn iter_outline<'s>(
+        &'s self, style: &'s impl Style
+    ) -> OutlineIter<impl Iterator<Item = PathEl> + 's> {
+        OutlineIter(self.elements(style))
     }
 
-    pub fn apply_offset(
-        &self, offset: f64, canvas: &mut canvas::Group, style: &impl Style,
-    ) {
-        canvas.apply_outline(self.offset_elements(offset, style))
+    pub fn iter_outline_offset<'s>(
+        &'s self, offset: f64, style: &'s impl Style
+    ) -> OutlineIter<impl Iterator<Item = PathEl> + 's> {
+        OutlineIter(self.offset_elements(offset, style))
     }
 
     pub fn elements<'s>(
@@ -247,14 +249,14 @@ impl<'a, S> PartitionIter<'a, S> {
 }
 
 impl<'a, S: Style> Iterator for PartitionIter<'a, S> {
-    type Item = canvas::Path;
+    type Item = crate::render::canvas::Path;
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut seg = match self.cur_seg {
             Some(seg) => seg,
             None => self.next_seg.next()? // Return on empty.
         };
-        let mut res = canvas::Path::new();
+        let mut res = crate::render::canvas::Path::new();
         let mut part_len = self.part_len;
         res.move_to(seg.p0());
 

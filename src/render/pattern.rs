@@ -3,7 +3,7 @@
 use std::fmt;
 use std::num::ParseIntError;
 use std::str::FromStr;
-use super::canvas;
+use super::canvas::{Sketch, SketchProperty};
 
 
 //------------ Pattern -------------------------------------------------------
@@ -22,10 +22,10 @@ impl From<Color> for Pattern {
     }
 }
 
-impl<'a> canvas::Property for &'a Pattern {
-    fn apply_to_group(self, group: &mut canvas::Group) {
+impl<'a> SketchProperty for &'a Pattern {
+    fn apply_to_sketch(self, group: &mut Sketch) {
         match self.0 {
-            Flavor::Color(color) => color.apply_to_group(group),
+            Flavor::Color(color) => color.apply_to_sketch(group),
         }
     }
 }
@@ -117,8 +117,8 @@ impl Color {
     pub const TRANSPARENT: Color = Color::rgba(0., 0., 0., 0.);
 }
 
-impl canvas::Property for Color {
-    fn apply_to_group(self, group: &mut canvas::Group) {
+impl SketchProperty for Color {
+    fn apply_to_sketch(self, group: &mut Sketch) {
         group.cairo().set_source_rgba(
             self.red, self.green, self.blue, self.alpha
         )

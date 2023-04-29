@@ -1,7 +1,15 @@
-pub use self::canvas::Canvas;
+pub use self::canvas::{
+    Canvas, DashPattern, Group, LineCap, LineJoin, LineWidth, Matrix, Operator,
+    Sketch, SketchProperty
+};
+pub use self::outline::Outline;
+pub use self::pattern::{Color, InvalidHexColor, Pattern};
+pub use self::text::{
+    Font, FontBuilder, FontFamily, FontFeatures, FontStretch, FontStyle,
+    FontWeight, Text,
+};
 
-pub mod canvas;
-pub mod paint;
-pub mod pattern;
-pub mod pen;
-pub mod text;
+pub(crate) mod canvas;
+mod pattern;
+pub(crate) mod outline;
+mod text;
