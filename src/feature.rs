@@ -68,8 +68,10 @@ struct StoredFeature<F> {
     #[allow(dead_code)]
     layer: i16,
 
-    /// The order of the feature within the layer.
-    order: f64,
+    /// The group of the feature within the layer.
+    ///
+    /// Smaller groups are rendered first.
+    group: i16,
 
     /// The bounds of the feature.
     ///
@@ -79,12 +81,12 @@ struct StoredFeature<F> {
 
 impl<F: Feature> StoredFeature<F> {
     /// Creates a new stored feature from its components.
-    fn new(feature: F, scale: (f64, f64), layer: i16, order: f64) -> Self {
+    fn new(feature: F, scale: (f64, f64), layer: i16, group: i16) -> Self {
         let bounds = feature.storage_bounds();
         StoredFeature {
             feature,
             layer,
-            order,
+            group,
             bounds: AABB::from_corners(
                 [scale.0 - f64::EPSILON, bounds.sw.lon, bounds.sw.lat],
                 [scale.1 + f64::EPSILON, bounds.ne.lon, bounds.ne.lat],
@@ -137,8 +139,8 @@ impl<F> FeatureSet<F> {
     ///
     /// The method returns a vec – albeit wrapped in a special helper type –
     /// of all the shapes resulting from shaping features intersecting with
-    /// the give bounds using the given style. The returned shapes are
-    /// sorted accoring to their feature’s order.
+    /// the given bounds using the given style. The returned shapes are
+    /// sorted accoring to their feature’s layer and group.
     pub fn shape(
         &self, scale: f64, bounds: world::Rect, style: &F::Style,
         canvas: &Canvas,
@@ -148,7 +150,7 @@ impl<F> FeatureSet<F> {
             &Self::envelope(scale, bounds)
         ).filter_map(|item| {
             item.feature.shape(style, canvas).map(|shape| {
-                Shaped::new(item.layer, item.order, shape)
+                Shaped::new(item.layer, item.group, shape)
             })
         }).collect();
         shapes.sort_unstable_by(|left, right| {
@@ -162,7 +164,7 @@ impl<F> FeatureSet<F> {
     /// Returns an iterator over features intersecting with the given bounds.
     ///
     /// The returned iterator is unordered, i.e., the features are not
-    /// arranged according to their order.
+    /// arranged according to their layer and group.
     pub fn locate_unordered(
         &self, scale: f64, bounds: world::Rect
     ) -> impl Iterator<Item = &F> {
@@ -228,14 +230,11 @@ impl<F> FeatureSetBuilder<F> {
     /// They don’t need to be the actual scale but could also be zoom levels
     /// or some other abstract numerical value that represents how detailed
     /// the map needs to be.
-    ///
-    /// The `order` argument defines when a feature’s shape will be rendered
-    /// compared to other shapes. This can be used to layer features.
     pub fn insert(
-        &mut self, feature: F, scale: (f64, f64), layer: i16, order: f64
+        &mut self, feature: F, scale: (f64, f64), layer: i16, group: i16,
     )
     where F: Feature {
-        let feature = StoredFeature::new(feature, scale, layer, order);
+        let feature = StoredFeature::new(feature, scale, layer, group);
         if let Some(bounds) = self.bounds.as_mut() {
             bounds.merge(&feature.bounds)
         }
@@ -262,17 +261,17 @@ impl<F> FeatureSetBuilder<F> {
 /// A single feature that has been shaped for rendering.
 pub struct Shaped<S> {
     layer: i16,
-    order: f64,
+    group: i16,
     shape: S,
 }
 
 impl<S> Shaped<S> {
-    fn new(layer: i16, order: f64, shape: S) -> Self {
-        Self { layer, order, shape }
+    fn new(layer: i16, group: i16, shape: S) -> Self {
+        Self { layer, group, shape }
     }
 
-    fn key(&self) -> (i16, f64) {
-        (self.layer, self.order)
+    fn key(&self) -> (i16, i16) {
+        (self.layer, self.group)
     }
 
     pub fn layer(&self) -> i16 {
@@ -336,7 +335,7 @@ impl<'a, S> Iterator for ShapeGroupIter<'a, S> {
             let mut len = 1;
             let mut iter = self.slice.windows(2);
             while let Some([l, r]) = iter.next() {
-                if l.layer() == r.layer() {
+                if l.key() == r.key() {
                     len += 1
                 }
                 else {
