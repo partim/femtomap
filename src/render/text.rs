@@ -1,5 +1,6 @@
 use std::borrow::Cow;
-use kurbo::{Point, Rect};
+use std::marker::PhantomData;
+use kurbo::{Point, Rect, Vec2};
 
 
 //------------ Text ----------------------------------------------------------
@@ -7,36 +8,53 @@ use kurbo::{Point, Rect};
 /// A line of text prepared for rendering onto a canvas.
 #[derive(Clone, Debug)]
 pub struct Text<'a> {
-    text: &'a str,
-    font: cairo::ScaledFont,
+    layout: pango::Layout,
+    offset: Vec2,
+    marker: PhantomData<&'a ()>,
 }
 
 impl<'a> Text<'a> {
-    pub(super) fn prepare(text: &'a str, font: Font) -> Self {
-        Text { text, font: font.font }
+    pub(super) fn prepare(
+        pango: &pango::Context, text: &'a str, font: Font
+    ) -> Self {
+        let layout = pango::Layout::new(pango);
+        layout.set_text(text);
+        layout.set_attributes(Some(&font.attrs));
+        let offset = Vec2::new(
+            0.,
+            -f64::from(layout.baseline()) / f64::from(pango::SCALE)
+        );
+
+        Self {
+            layout,
+            offset,
+            marker: PhantomData,
+        }
     }
 
-    pub(super) fn text_metrics(&self, cairo: &cairo::Context) -> TextMetrics {
-        cairo.set_scaled_font(&self.font);
-        TextMetrics::from_cairo(cairo, self.text)
+    pub(super) fn text_metrics(&self) -> TextMetrics {
+        let (ink, logical) = self.layout.extents();
+        TextMetrics {
+            ink: rect_from_pango(ink) + self.offset,
+            logical: rect_from_pango(logical) + self.offset,
+        }
     }
 
     pub(super) fn fill(&self, cairo: &cairo::Context, at: Point) {
-        self.prepare_text(cairo, at);
-        cairo.fill().expect("cairo_fill failed");
+        self.start_path(cairo, at);
+        pangocairo::show_layout(cairo, &self.layout);
     }
 
     pub(super) fn stroke(&self, cairo: &cairo::Context, at: Point) {
-        self.prepare_text(cairo, at);
+        self.start_path(cairo, at);
+        pangocairo::layout_path(cairo, &self.layout);
         cairo.stroke().expect("cairo_stroke failed");
     }
 
-    /// Sets the font styles for text rendering.
-    fn prepare_text(&self, cairo: &cairo::Context, at: Point) {
-        cairo.set_scaled_font(&self.font);
+    fn start_path(&self, cairo: &cairo::Context, at: Point) {
+        let at = at + self.offset;
         cairo.new_path();
         cairo.move_to(at.x, at.y);
-        cairo.text_path(self.text);
     }
 }
 
@@ -45,29 +63,22 @@ impl<'a> Text<'a> {
 
 /// A line of text prepared for rendering onto a canvas.
 pub struct TextMetrics {
-    text: cairo::TextExtents,
-    font: cairo::FontExtents,
+    ink: Rect,
+    logical: Rect,
 }
 
 impl TextMetrics {
-    fn from_cairo(cairo: &cairo::Context, text: &str) -> Self {
-        TextMetrics {
-            text: cairo.text_extents(text).expect("cairo_text_extents failed"),
-            font: cairo.font_extents().expect("cairo_font_extents failed"),
-        }
+    pub fn inked(&self) -> Rect {
+        self.ink
     }
 
+    pub fn logical(&self) -> Rect {
+        self.logical
+    }
+
+    /*
     pub fn advance(&self) -> Point {
         Point::new(self.text.x_advance(), self.text.y_advance())
-    }
-
-    pub fn inked(&self) -> Rect {
-        Rect::new(
-            self.text.x_bearing(),
-            self.text.y_bearing(),
-            self.text.width() + self.text.x_bearing(),
-            self.text.height() + self.text.y_bearing(),
-        )
     }
 
     pub fn ascent(&self) -> f64 {
@@ -81,6 +92,17 @@ impl TextMetrics {
     pub fn line_height(&self) -> f64 {
         self.font.height()
     }
+    */
+}
+
+fn rect_from_pango(rect: pango::Rectangle) -> Rect {
+    let x = f64::from(rect.x()) / f64::from(pango::SCALE);
+    let y = f64::from(rect.y()) / f64::from(pango::SCALE);
+    Rect::new(
+        x, y,
+        f64::from(rect.width()) / f64::from(pango::SCALE) + x,
+        f64::from(rect.height()) / f64::from(pango::SCALE) + y,
+    )
 }
 
 
@@ -89,7 +111,7 @@ impl TextMetrics {
 /// Description of a font.
 #[derive(Clone, Debug)]
 pub struct Font {
-    font: cairo::ScaledFont,
+    attrs: pango::AttrList,
 }
 
 
@@ -101,6 +123,7 @@ pub struct FontBuilder {
     family: Option<FontFamily>,
     size: Option<f64>,
     features: Option<FontFeatures>,
+    line_height: Option<f64>,
     stretch: Option<FontStretch>,
     style: Option<FontStyle>,
     variant: Option<FontVariant>,
@@ -124,6 +147,11 @@ impl FontBuilder {
 
     pub fn features(mut self, features: FontFeatures) -> Self {
         self.features = Some(features);
+        self
+    }
+
+    pub fn line_height(mut self, line_height: f64) -> Self {
+        self.line_height = Some(line_height);
         self
     }
 
@@ -158,6 +186,9 @@ impl FontBuilder {
         if self.features.is_none() {
             self.features = other.features.clone();
         }
+        if self.line_height.is_none() {
+            self.line_height = other.line_height
+        }
         if self.stretch.is_none() {
             self.stretch = other.stretch;
         }
@@ -173,29 +204,37 @@ impl FontBuilder {
     }
 
     pub fn finalize(self) -> Font {
-        let mut matrix = cairo::Matrix::identity();
-        let size = self.size.unwrap_or(12.);
-        matrix.scale(size, size);
-        let options = cairo::FontOptions::new().expect(
-            "cairo_font_options_create failed"
-        );
+        let mut descr = pango::FontDescription::new();
+        if let Some(family) = self.family.as_ref() {
+            descr.set_family(family.family.as_ref());
+        }
+        if let Some(size) = self.size {
+            descr.set_absolute_size(size * f64::from(pango::SCALE));
+        }
+        if let Some(stretch) = self.stretch {
+            descr.set_stretch(stretch.into())
+        }
+        if let Some(style) = self.style {
+            descr.set_style(style.into())
+        }
+        if let Some(variant) = self.variant {
+            descr.set_variant(variant.into())
+        }
+        if let Some(weight) = self.weight {
+            descr.set_weight(weight.into())
+        }
+
+        let attrs = pango::AttrList::new();
+        attrs.insert(pango::AttrFontDesc::new(&descr));
+        if let Some(line_height) = self.line_height {
+            attrs.insert(pango::AttrFloat::new_line_height(line_height));
+        }
         if let Some(features) = self.features.as_ref() {
-            options.set_variations(Some(features.features.as_ref()))
+            attrs.insert(
+                pango::AttrFontFeatures::new(features.features.as_ref())
+            );
         }
-        Font {
-            font: cairo::ScaledFont::new(
-                &cairo::FontFace::toy_create(
-                    self.family.as_ref().map(|family| {
-                        family.family.as_ref()
-                    }).unwrap_or(""),
-                    self.style.unwrap_or_default().into_cairo(),
-                    self.weight.unwrap_or_default().into_cairo(),
-                ).expect("cairo_toy_font_face_create failed"),
-                &matrix,
-                &cairo::Matrix::identity(),
-                &options,
-            ).expect("cairo_scaled_font_create failed"),
-        }
+        Font { attrs }
     }
 }
 
@@ -232,7 +271,7 @@ pub struct FontFeatures {
 }
 
 impl FontFeatures {
-    pub fn from_static(features: &'static str) -> Self {
+    pub const fn from_static(features: &'static str) -> Self {
         Self {
             features: Cow::Borrowed(features)
         }
@@ -260,7 +299,23 @@ pub enum FontStretch {
     SemiExpanded,
     Expanded,
     ExtraExpanded,
-    UtlraExpanded
+    UltraExpanded
+}
+
+impl From<FontStretch> for pango::Stretch {
+    fn from(src: FontStretch) -> Self {
+        match src {
+            FontStretch::UltraCondensed => pango::Stretch::UltraCondensed,
+            FontStretch::ExtraCondensed => pango::Stretch::ExtraCondensed,
+            FontStretch::Condensed => pango::Stretch::Condensed,
+            FontStretch::SemiCondensed => pango::Stretch::SemiCondensed,
+            FontStretch::Normal => pango::Stretch::Normal,
+            FontStretch::SemiExpanded => pango::Stretch::SemiExpanded,
+            FontStretch::Expanded => pango::Stretch::Expanded,
+            FontStretch::ExtraExpanded => pango::Stretch::ExtraExpanded,
+            FontStretch::UltraExpanded => pango::Stretch::UltraExpanded,
+        }
+    }
 }
 
 
@@ -275,12 +330,12 @@ pub enum FontStyle {
     Italic,
 }
 
-impl FontStyle {
-    fn into_cairo(self) -> cairo::FontSlant {
-        match self {
-            Self::Normal => cairo::FontSlant::Normal,
-            Self::Oblique => cairo::FontSlant::Oblique,
-            Self::Italic => cairo::FontSlant::Italic,
+impl From<FontStyle> for pango::Style {
+    fn from(src: FontStyle) -> Self {
+        match src {
+            FontStyle::Normal => pango::Style::Normal,
+            FontStyle::Oblique => pango::Style::Oblique,
+            FontStyle::Italic => pango::Style::Italic,
         }
     }
 }
@@ -294,11 +349,15 @@ pub enum FontVariant {
     #[default]
     Normal,
     SmallCaps,
-    AllSmallCaps,
-    PetiteCaps,
-    AllPetiteCaps,
-    Unicase,
-    TitleCaps,
+}
+
+impl From<FontVariant> for pango::Variant {
+    fn from(src: FontVariant) -> Self {
+        match src {
+            FontVariant::Normal => pango::Variant::Normal,
+            FontVariant::SmallCaps => pango::Variant::SmallCaps,
+        }
+    }
 }
 
 
@@ -308,25 +367,35 @@ pub enum FontVariant {
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum FontWeight {
     Thin,
-    UltraLight,
+    Ultralight,
     Light,
-    SemiLight,
+    Semilight,
     Book,
     #[default]
     Normal,
     Medium,
     Semibold,
     Bold,
-    UltraBold,
+    Ultrabold,
     Heavy,
-    UltraHeavy,
+    Ultraheavy,
 }
 
-impl FontWeight {
-    fn into_cairo(self) -> cairo::FontWeight {
-        match self {
-            Self::Bold => cairo::FontWeight::Bold,
-            _ => cairo::FontWeight::Normal,
+impl From<FontWeight> for pango::Weight {
+    fn from(src: FontWeight) -> Self {
+        match src {
+            FontWeight::Thin => pango::Weight::Thin,
+            FontWeight::Ultralight => pango::Weight::Ultralight,
+            FontWeight::Light => pango::Weight::Light,
+            FontWeight::Semilight => pango::Weight::Semilight,
+            FontWeight::Book => pango::Weight::Book,
+            FontWeight::Normal => pango::Weight::Normal,
+            FontWeight::Medium => pango::Weight::Medium,
+            FontWeight::Semibold => pango::Weight::Semibold,
+            FontWeight::Bold => pango::Weight::Bold,
+            FontWeight::Ultrabold => pango::Weight::Ultrabold,
+            FontWeight::Heavy => pango::Weight::Heavy,
+            FontWeight::Ultraheavy => pango::Weight::Ultraheavy,
         }
     }
 }

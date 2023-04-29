@@ -21,15 +21,19 @@ pub use super::pattern::Color;
 pub struct Canvas {
     /// The Cairo context we use for actual rendering.
     cairo: cairo::Context,
+
+    /// The Pango context we use for text rendering.
+    pango: pango::Context,
 }
 
 // XXX Cairo-specific things. 
 impl Canvas {
     /// Creates a new canvas.
     pub fn new(surface: &cairo::Surface) -> Self {
-        Canvas {
-            cairo: cairo::Context::new(surface).unwrap(),
-        }
+        let cairo = cairo::Context::new(surface).expect("cairo_create failed");
+        let pango = pangocairo::create_context(&cairo);
+
+        Canvas { cairo, pango }
     }
 
     /// Sets the clipping ara.
@@ -51,13 +55,17 @@ impl Canvas {
     pub fn prepare_text<'a>(
         &self, text: &'a str, font: Font
     ) -> Text<'a> {
-        Text::prepare(text, font)
+        Text::prepare(self.pango(), text, font)
     }
 
     pub fn text_metrics(
         &self, text: &Text
     ) -> TextMetrics {
-        text.text_metrics(&self.cairo)
+        text.text_metrics()
+    }
+
+    pub(super) fn pango(&self) -> &pango::Context {
+        &self.pango
     }
 }
 

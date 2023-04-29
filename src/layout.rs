@@ -397,10 +397,11 @@ impl<P> Span<P> {
         let metrics = canvas.text_metrics(&text);
 
         let extents = if self.properties.packed(style) {
-            // If we are packed, we only consider the inked area.
             metrics.inked()
         }
         else {
+            metrics.logical()
+            /*
             let advance = metrics.advance();
 
             if advance.x != 0. {
@@ -432,6 +433,7 @@ impl<P> Span<P> {
                     if advance.y > 0. { advance.y } else { 0. },
                 )
             }
+            */
         };
 
         let inner = self.properties.padding(style).grow_rect(extents);
