@@ -1,7 +1,7 @@
 //! Complex text arrangements.
 
-use kurbo::{Rect, Vec2};
-use crate::render::{Canvas, Font, Sketch, Text};
+use kurbo::{PathEl, Point, Rect, Vec2};
+use crate::render::{Canvas, Font, OutlineIter, Sketch, Text};
 
 
 //------------ Block ---------------------------------------------------------
@@ -221,6 +221,9 @@ impl<P> Vbox<P> {
                 // Grow a horizontal rule to the width of the whole box.
                 if let Shape::Rule { horizontal: true } = shape.shape {
                     shape.inner.x1 = extents.width();
+                    if let Some(frame) = shape.frame.as_mut() {
+                        frame.x1 += extents.width();
+                    }
                     shape.outer.x1 += extents.width();
                 }
 
@@ -331,9 +334,12 @@ impl<P> Hbox<P> {
 
             // Now shift each child.
             children.iter_mut().for_each(|shape| {
-                // Grow a horizontal rule to the width of the whole box.
+                // Grow a vertical rule to the height of the whole box.
                 if let Shape::Rule { horizontal: false } = shape.shape {
                     shape.inner.y1 = extents.height();
+                    if let Some(frame) = shape.frame.as_mut() {
+                        frame.y1 += extents.height();
+                    }
                     shape.outer.y1 += extents.height();
                 }
 
@@ -739,11 +745,30 @@ impl<'a, P> ShapedLayout<'a, P> {
 
     pub fn fill_frame(&self, base: Vec2, canvas: &mut Sketch) {
         if let Some(frame) = self.frame {
-            canvas.apply(frame + base + self.offset);
-            let inner = self.inner + base + self.offset;
-            canvas.apply(
-                Rect::new(inner.x1, inner.y1, inner.x0, inner.y0)
-            );
+            let frame = frame + base + self.offset;
+            if
+                self.inner.x0 != self.inner.x1
+                || self.inner.y0 != self.inner.y1
+            {
+                let inner = self.inner + base + self.offset;
+                canvas.apply(
+                    OutlineIter([
+                        PathEl::MoveTo(Point::new(frame.x0, frame.y0)),
+                        PathEl::LineTo(Point::new(frame.x0, frame.y1)),
+                        PathEl::LineTo(Point::new(frame.x1, frame.y1)),
+                        PathEl::LineTo(Point::new(frame.x1, frame.y0)),
+                        PathEl::ClosePath,
+                        PathEl::MoveTo(Point::new(inner.x0, inner.y0)),
+                        PathEl::LineTo(Point::new(inner.x1, inner.y0)),
+                        PathEl::LineTo(Point::new(inner.x1, inner.y1)),
+                        PathEl::LineTo(Point::new(inner.x0, inner.y1)),
+                        PathEl::ClosePath,
+                    ])
+                );
+            }
+            else {
+                canvas.apply(frame);
+            }
             canvas.fill();
         }
     }
