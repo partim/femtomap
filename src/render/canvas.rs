@@ -277,6 +277,12 @@ impl<'a> SketchProperty for &'a BezPath {
     }
 }
 
+impl<const N: usize> SketchProperty for [PathEl; N] {
+    fn apply_to_sketch(self, group: &mut Sketch) {
+        OutlineIter(self.into_iter()).apply_to_sketch(group);
+    }
+}
+
 impl SketchProperty for Rect {
     fn apply_to_sketch(self, group: &mut Sketch) {
         let cairo = group.cairo();
