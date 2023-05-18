@@ -88,8 +88,8 @@ impl<F: Feature> StoredFeature<F> {
             layer,
             group,
             bounds: AABB::from_corners(
-                [scale.0 - f64::EPSILON, bounds.sw.lon, bounds.sw.lat],
-                [scale.1 + f64::EPSILON, bounds.ne.lon, bounds.ne.lat],
+                [scale.0, bounds.sw.lon, bounds.sw.lat],
+                [scale.1, bounds.ne.lon, bounds.ne.lat],
             ),
         }
     }
