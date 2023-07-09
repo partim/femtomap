@@ -5,7 +5,7 @@ pub use self::path::{
     Transform,
 };
 pub use self::trace::{
-    Edge, Position, PartitionIter, SegmentIter, Subpath,Trace
+    Edge, Position, Segment, SegmentIter, Subpath,Trace
 };
 
 mod path;

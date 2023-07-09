@@ -4,8 +4,8 @@
 use std::{cmp, iter, slice};
 use std::f64::consts::PI;
 use kurbo::{
-    DEFAULT_ACCURACY, BezPath, CubicBez, Line, Rect, ParamCurve,
-    ParamCurveArclen, ParamCurveExtrema, PathEl, Point, Vec2
+    DEFAULT_ACCURACY, CubicBez, Line, Rect, ParamCurve,
+    ParamCurveArclen, ParamCurveExtrema, PathEl, PathSeg, Point, Vec2
 };
 use crate::mp_path::velocity;
 use crate::render::outline::{Outline, OutlineIter};
@@ -58,11 +58,11 @@ impl Trace {
     }
 
     pub fn outline(&self, style: &impl Style) -> Outline {
-        BezPath::from_iter(self.elements(style)).into()
+        Outline::from_iter(self.segments(style))
     }
 
     pub fn outline_offset(&self, offset: f64, style: &impl Style) -> Outline {
-        BezPath::from_iter(self.offset_elements(offset, style)).into()
+        Outline::from_iter(self.offset_segments(offset, style))
     }
 
     pub fn iter_outline<'s>(
@@ -116,6 +116,13 @@ impl Trace {
         SegmentIter::new(self, style)
     }
 
+    pub fn offset_segments<'a, S: Style>(
+        &'a self, offset: f64, style: &'a S,
+    ) -> impl Iterator<Item = Segment> + 'a {
+        SegmentIter::new(self, style).map(move |seg| seg.offset(offset))
+    }
+
+    /*
     pub fn partitions<'a, S: Style>(
         &'a self, part_len: f64, style: &'a S,
     ) -> PartitionIter<'a, S> {
@@ -124,6 +131,7 @@ impl Trace {
             part_len * style.transform().canvas_bp()
         )
     }
+    */
 }
 
 
@@ -207,6 +215,7 @@ impl<'a, S: Style> Iterator for SegmentIter<'a, S> {
 }
 
 
+/*
 //------------ PartitionIter ------------------------------------------------
 
 /// An iterator over equal-length partitions of a path.
@@ -249,14 +258,14 @@ impl<'a, S> PartitionIter<'a, S> {
 }
 
 impl<'a, S: Style> Iterator for PartitionIter<'a, S> {
-    type Item = crate::render::canvas::Path;
+    type Item = crate::render::Outline;
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut seg = match self.cur_seg {
             Some(seg) => seg,
             None => self.next_seg.next()? // Return on empty.
         };
-        let mut res = crate::render::canvas::Path::new();
+        let mut res = BezPath::new();
         let mut part_len = self.part_len;
         res.move_to(seg.p0());
 
@@ -288,9 +297,10 @@ impl<'a, S: Style> Iterator for PartitionIter<'a, S> {
                 }
             }
         }
-        Some(res)
+        Some(res.into())
     }
 }
+*/
 
 
 //------------ Section -------------------------------------------------------
@@ -884,6 +894,13 @@ pub struct Segment {
 
     /// The optional precomputed arc length of the segment.
     arclen: Option<f64>,
+
+    /// Length factor resulting from offsetting the segment.
+    ///
+    /// Calculated by dividing the arclen of the segment by the arclen of
+    /// the same segment before offsetting. Ie., value greater than 1. mean
+    /// the segment has gotten longer by offsetting.
+    off_factor: f64,
 }
 
 impl Segment {
@@ -894,6 +911,7 @@ impl Segment {
             control: None,
             end,
             arclen,
+            off_factor: 1.,
         }
     }
 
@@ -906,6 +924,7 @@ impl Segment {
             control: Some((c0, c1)),
             end,
             arclen,
+            off_factor: 1.,
         }
     }
 
@@ -973,6 +992,11 @@ impl Segment {
         self.control.map(|c| c.0).unwrap_or_else(|| self.start)
     }
 
+    /// Returns the control points if this segment is curved.
+    pub fn control(self) -> Option<(Point, Point)> {
+        self.control
+    }
+
     /// Returns the second control point of the segment.
     ///
     /// If the segment is a straight line, this is the end point.
@@ -991,6 +1015,11 @@ impl Segment {
             Ok(seg) => seg.eval(at),
             Err(seg) => seg.eval(at)
         }
+    }
+
+    /// Returns the offset length factor.
+    pub fn off_factor(self) -> f64 {
+        self.off_factor
     }
 
     /// Returns a tangent vector at the given times value.
@@ -1116,7 +1145,8 @@ impl Segment {
             start: self.end,
             control: self.control.map(|(c0, c1)| (c1, c0)),
             end: self.start,
-            arclen: self.arclen
+            arclen: self.arclen,
+            off_factor: self.off_factor,
         }
     }
 
@@ -1134,6 +1164,7 @@ impl Segment {
             arclen: self.arclen.map(|arclen| {
                 style.transform().transform().as_tuple().1 * arclen
             }),
+            off_factor: self.off_factor,
         }
     }
 
@@ -1159,7 +1190,8 @@ impl Segment {
                     start: bez.p0,
                     control: Some((bez.p1, bez.p2)),
                     end: bez.p3,
-                    arclen: None
+                    arclen: None,
+                    off_factor: self.off_factor,
                 }
             }
             Err(line) => {
@@ -1168,7 +1200,8 @@ impl Segment {
                     start: line.p0,
                     control: None,
                     end: line.p1,
-                    arclen: None
+                    arclen: None,
+                    off_factor: self.off_factor,
                 }
             }
         }
@@ -1200,7 +1233,7 @@ impl Segment {
 
         // Since control points can be identical (too close to?) to their
         // nearest endpoint, we end up with four cases.
-        match (u, v) {
+        let mut res = match (u, v) {
             (Some(u), Some(v)) => {
                 // Four unique points.
                 // 
@@ -1228,7 +1261,7 @@ impl Segment {
             (None, Some(v)) => {
                 // r and u are the same.
                 //
-                // We skip calculating uu and just set it rr.
+                // We skip calculating uu and just set it to rr.
                 let wrv = v - r;
                 let wvs = s - v;
                 let rr = r + rot90(wrv).normalize() * offset;
@@ -1252,17 +1285,46 @@ impl Segment {
                 let d = rot90(s - r).normalize() * offset;
                 Segment::line(r + d, s + d, None)
             }
-        }
+        };
+        let arclen = res.arclen();
+        res.arclen = Some(arclen);
+        res.off_factor = arclen / self.arclen();
+        res
     }
 
-    fn start_element(&self) -> PathEl {
+    pub fn start_element(&self) -> PathEl {
         PathEl::MoveTo(self.start)
     }
 
-    fn tail_element(&self) -> PathEl {
+    pub fn tail_element(&self) -> PathEl {
         match self.control {
             Some((c0, c1)) => PathEl::CurveTo(c0, c1, self.end),
             None => PathEl::LineTo(self.end),
+        }
+    }
+}
+
+impl From<PathSeg> for Segment {
+    fn from(seg: PathSeg) -> Self {
+        match seg {
+            PathSeg::Line(line) => Self::line(line.p0, line.p1, None),
+            PathSeg::Quad(_) => unimplemented!(),
+            PathSeg::Cubic(seg) => {
+                Self::curve(seg.p0, seg.p1, seg.p2, seg.p3, None)
+            }
+        }
+    }
+}
+
+impl From<Segment> for PathSeg {
+    fn from(seg: Segment) -> Self {
+        match seg.control {
+            Some((c0, c1)) => {
+                CubicBez::new(seg.start, c0, c1, seg.end).into()
+            }
+            None => {
+                Line::new(seg.start, seg.end).into()
+            }
         }
     }
 }

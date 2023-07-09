@@ -1,11 +1,8 @@
 //! Outlines of shapes.
 
-use std::{cmp, iter, slice};
-use kurbo::{
-    DEFAULT_ACCURACY, BezPath, PathEl, ParamCurve, ParamCurveArclen,
-    ParamCurveDeriv, PathSeg, Point, Segments, Vec2
-};
-use crate::path::SegTime;
+use std::{cmp, slice};
+use kurbo::{PathEl, Point};
+use crate::path::{SegTime, Segment};
 use super::canvas::{Sketch, SketchProperty};
 
 
@@ -14,18 +11,43 @@ use super::canvas::{Sketch, SketchProperty};
 #[derive(Clone, Debug, Default)]
 pub struct Outline {
     /// The actual outline.
-    outline: BezPath,
+    outline: Vec<Segment>,
 }
 
+/*
 impl From<BezPath> for Outline {
     fn from(outline: BezPath) -> Self {
         Outline { outline }
     }
 }
+*/
+
+impl FromIterator<Segment> for Outline {
+    fn from_iter<T>(iter: T) -> Self
+    where T: IntoIterator<Item = Segment> {
+        Outline { outline: iter.into_iter().collect() }
+    }
+}
+
 
 impl<'a> SketchProperty for &'a Outline {
     fn apply_to_sketch(self, group: &mut Sketch) {
-        self.outline.apply_to_sketch(group)
+        group.cairo().new_path();
+        match self.outline.first() {
+            Some(seg) => group.cairo().move_to(seg.p0().x, seg.p0().y),
+            None => return
+        };
+        self.outline.iter().for_each(|seg| {
+            if let Some((p1, p2)) = seg.control() {
+                group.cairo().curve_to(
+                    p1.x, p1.y, p2.x, p2.y,
+                    seg.p3().x, seg.p3().y
+                );
+            }
+            else {
+                group.cairo().line_to(seg.p3().x, seg.p3().y)
+            }
+        })
     }
 }
 
@@ -34,15 +56,25 @@ impl Outline {
         Self::default()
     }
 
+    /// Pushes a segment to the end of the outline.
+    ///
+    /// This assumes that the segment continues the current path
+    fn push_cont_seg(&mut self, seg: Segment) {
+        self.outline.push(seg)
+    }
+
     /// Returns the number of nodes in the path.
     pub fn node_len(&self) -> u32 {
-        self.outline.elements().len().try_into().unwrap()
+        match self.outline.len() {
+            0 => 0,
+            len => u32::try_from(len + 1).expect("super long outline")
+        }
     }
 
     /// Returns the arc length of the path.
     pub fn arclen(&self) -> f64 {
-        self.outline.segments().fold(0., |len, seg| {
-            len + seg.arclen(DEFAULT_ACCURACY)
+        self.outline.iter().fold(0., |len, seg| {
+            len + seg.arclen()
         })
     }
 
@@ -73,37 +105,39 @@ impl Outline {
         let end = self.resolve_time(end_time);
         let mut res = Outline::new();
         if start.seg == end.seg {
-            let seg = self.get_seg(start).subsegment(start.time..end.time);
-            res.move_to_seg(seg);
-            res.append_seg(seg);
+            res.push_cont_seg(
+                self.get_seg(start).sub(start.time, end.time)
+            );
         }
         else if start <= end {
-            let first = self.get_seg(start).subsegment(start.time..1.);
-            res.move_to_seg(first);
-            res.append_seg(first);
+            res.push_cont_seg(
+                self.get_seg(start).sub(start.time, 1.)
+            );
             start.seg += 1;
             while start.seg < end.seg {
-                res.append_seg(self.get_seg(start))
+                res.push_cont_seg(self.get_seg(start))
             }
-            let last = self.get_seg(end).subsegment(0. .. end.time);
-            res.append_seg(last);
+            res.push_cont_seg(
+                self.get_seg(end).sub(0., end.time)
+            );
         }
         else {
-            let first = self.get_seg(start)
-                .subsegment(0. .. start.time)
-                .reverse();
-            res.move_to_seg(first);
-            res.append_seg(first);
+            res.push_cont_seg(
+                self.get_seg(start).sub(0., start.time).rev()
+            );
             start.seg -= 1;
             while start.seg > end.seg {
-                res.append_seg(self.get_seg(start).reverse())
+                res.push_cont_seg(self.get_seg(start).rev());
             }
-            let last = self.get_seg(end)
-                .subsegment(end.time .. 1.)
-                .reverse();
-            res.append_seg(last);
+            res.push_cont_seg(
+                self.get_seg(end).sub(end.time, 1.).rev()
+            );
         }
         res
+    }
+
+    pub fn offset(&self, offset: f64) -> Self {
+        Self::from_iter(self.outline.iter().map(|seg| seg.offset(offset)))
     }
 
     pub fn iter_positions(
@@ -150,34 +184,12 @@ impl Outline {
     }
     
     /// Returns the complete path segment with the given index.
-    fn get_seg(&self, loc: SegTime) -> PathSeg {
-        self.outline.get_seg(loc.seg as usize).unwrap()
-    }
-
-    /// Moves to the beginning of the segment.
-    fn move_to_seg(&mut self, seg: PathSeg) {
-        self.outline.move_to(match seg {
-            PathSeg::Line(line) => line.p0,
-            PathSeg::Quad(..) => unreachable!(),
-            PathSeg::Cubic(cubic) => cubic.p0
-        })
-    }
-
-    /// Appends the tail end of the segment.
-    ///
-    /// This assumes that the last point on the path is already the start
-    /// point of the segment.
-    fn append_seg(&mut self, seg: PathSeg) {
-        match seg {
-            PathSeg::Line(line) => self.outline.line_to(line.p1),
-            PathSeg::Quad(..) => unreachable!(),
-            PathSeg::Cubic(cubic) => {
-                self.outline.curve_to(cubic.p1, cubic.p2, cubic.p3)
-            }
-        }
+    fn get_seg(&self, loc: SegTime) -> Segment {
+        *self.outline.get(loc.seg as usize).unwrap()
     }
 }
 
+/*
 impl<'a> IntoIterator for &'a Outline {
     type Item = PathEl;
     type IntoIter = <&'a BezPath as IntoIterator>::IntoIter;
@@ -186,6 +198,7 @@ impl<'a> IntoIterator for &'a Outline {
         (&self.outline).into_iter()
     }
 }
+*/
 
 
 //------------ OutlineIter ---------------------------------------------------
@@ -219,46 +232,84 @@ impl<I: IntoIterator<Item = PathEl>> SketchProperty for OutlineIter<I> {
 //------------ Positions -----------------------------------------------------
 
 pub struct Positions<'a> {
-    cur_seg: Option<PathSeg>,
-    iter: Segments<iter::Cloned<slice::Iter<'a, PathEl>>>,
+    cur_seg: Option<Segment>,
+    iter: slice::Iter<'a, Segment>,
 }
 
 impl<'a> Positions<'a> {
     fn new(outline: &'a Outline) -> Self {
         Self {
             cur_seg: None,
-            iter: kurbo::segments(outline.into_iter()),
+            iter: outline.outline.iter(),
         }
     }
 
     pub fn advance(&mut self, mut distance: f64) -> Option<(Point, f64)> {
         let mut seg = match self.cur_seg {
             Some(seg) => seg,
-            None => self.iter.next()?, // Return on empty
+            None => *self.iter.next()?, // Return on empty
         };
 
         loop {
-            let seg_len = seg.arclen(DEFAULT_ACCURACY);
-            match distance.partial_cmp(&seg_len).unwrap() {
+            let seg_len = seg.arclen();
+            let seg_distance = distance * seg.off_factor();
+            match seg_distance.partial_cmp(&seg_len).unwrap() {
                 cmp::Ordering::Less => {
-                    let end = seg.inv_arclen(distance, DEFAULT_ACCURACY);
-                    self.cur_seg = Some(seg.subsegment(end..1.));
+                    let end = seg.arctime(seg_distance);
+                    self.cur_seg = Some(seg.sub(end, 1.));
                     return Some((
-                        seg.eval(end),
-                        dir(seg, end).atan2()
+                        seg.point(end),
+                        seg.dir(end).atan2()
                     ))
                 }
                 cmp::Ordering::Equal => {
                     self.cur_seg = None;
                     return Some((
-                        seg.end(),
-                        dir(seg, 1.).atan2()
+                        seg.p3(),
+                        seg.dir(1.).atan2()
                     ))
                 }
                 cmp::Ordering::Greater => {
-                    distance -= seg_len;
+                    distance -= seg_len / seg.off_factor();
                     match self.iter.next() {
-                        Some(next_seg) => seg = next_seg,
+                        Some(next_seg) => seg = *next_seg,
+                        None => {
+                            self.cur_seg = None;
+                            return None
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn advance_sub(&mut self, mut distance: f64) -> Option<Outline> {
+        let mut seg = match self.cur_seg {
+            Some(seg) => seg,
+            None => *self.iter.next()?, // Return on empty
+        };
+        let mut res = Outline::new();
+
+        loop {
+            let seg_len = seg.arclen();
+            let seg_distance = distance * seg.off_factor();
+            match seg_distance.partial_cmp(&seg_len).unwrap() {
+                cmp::Ordering::Less => {
+                    let end = seg.arctime(distance);
+                    self.cur_seg = Some(seg.sub(end, 1.));
+                    res.push_cont_seg(seg.sub(0., end));
+                    return Some(res);
+                }
+                cmp::Ordering::Equal => {
+                    self.cur_seg = None;
+                    res.push_cont_seg(seg);
+                    return Some(res);
+                }
+                cmp::Ordering::Greater => {
+                    distance -= seg_len / seg.off_factor();
+                    res.push_cont_seg(seg);
+                    match self.iter.next() {
+                        Some(next_seg) => seg = *next_seg,
                         None => {
                             self.cur_seg = None;
                             return None
@@ -297,26 +348,5 @@ impl<'a> Iterator for PositionIter<'a> {
             self.offset.take().unwrap_or(self.part_len)
         )
     }
-}
-
-
-//------------ Helper Functions ----------------------------------------------
-
-/*
-fn first_point(seg: PathSeg) -> Point {
-    match seg {
-        PathSeg::Line(line) => line.p0,
-        PathSeg::Quad(..) => unreachable!(),
-        PathSeg::Cubic(cubic) => cubic.p0
-    }
-}
-*/
-
-fn dir(seg: PathSeg, at: f64) -> Vec2 {
-    match seg {
-        PathSeg::Line(seg) => seg.deriv().eval(at),
-        PathSeg::Quad(seg) => seg.deriv().eval(at),
-        PathSeg::Cubic(seg) => seg.deriv().eval(at),
-    }.to_vec2()
 }
 
