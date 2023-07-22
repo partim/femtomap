@@ -78,6 +78,13 @@ impl Outline {
         })
     }
 
+    /// Returns the arc length of the path along the centre.
+    pub fn base_arclen(&self) -> f64 {
+        self.outline.iter().fold(0., |len, seg| {
+            len + seg.arclen() / seg.off_factor()
+        })
+    }
+
     /*
     /// Returns the path time where the arc length reaches the given value.
     ///
@@ -295,7 +302,7 @@ impl<'a> Positions<'a> {
             let seg_distance = distance * seg.off_factor();
             match seg_distance.partial_cmp(&seg_len).unwrap() {
                 cmp::Ordering::Less => {
-                    let end = seg.arctime(distance);
+                    let end = seg.arctime(seg_distance);
                     self.cur_seg = Some(seg.sub(end, 1.));
                     res.push_cont_seg(seg.sub(0., end));
                     return Some(res);
