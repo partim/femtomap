@@ -319,7 +319,8 @@ impl<'a> Positions<'a> {
                         Some(next_seg) => seg = *next_seg,
                         None => {
                             self.cur_seg = None;
-                            return None
+                            // Return the short result anyway.
+                            return Some(res)
                         }
                     }
                 }
