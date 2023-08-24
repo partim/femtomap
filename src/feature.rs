@@ -65,7 +65,6 @@ struct StoredFeature<F> {
     feature: F,
 
     /// The layer of the feature.
-    #[allow(dead_code)]
     layer: i16,
 
     /// The group of the feature within the layer.
@@ -270,7 +269,7 @@ impl<S> Shaped<S> {
         Self { layer, group, shape }
     }
 
-    fn key(&self) -> (i16, i16) {
+    pub fn key(&self) -> (i16, i16) {
         (self.layer, self.group)
     }
 
@@ -335,7 +334,7 @@ impl<'a, S> Iterator for ShapeGroupIter<'a, S> {
             let mut len = 1;
             let mut iter = self.slice.windows(2);
             while let Some([l, r]) = iter.next() {
-                if l.key() == r.key() {
+                if l.layer() == r.layer() {
                     len += 1
                 }
                 else {
