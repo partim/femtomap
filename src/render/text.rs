@@ -127,6 +127,7 @@ pub struct FontBuilder {
     style: Option<FontStyle>,
     variant: Option<FontVariant>,
     weight: Option<FontWeight>,
+    line_height: Option<f64>,
 }
 
 impl FontBuilder {
@@ -169,6 +170,11 @@ impl FontBuilder {
         self
     }
 
+    pub fn line_height(mut self, factor: f64) -> Self {
+        self.line_height = Some(factor);
+        self
+    }
+
     /// Takes unset fields from a different value.
     pub fn update(&mut self, other: &Self) {
         if self.family.is_none() {
@@ -191,6 +197,9 @@ impl FontBuilder {
         }
         if self.weight.is_none() {
             self.weight = other.weight;
+        }
+        if self.line_height.is_none() {
+            self.line_height = other.line_height;
         }
     }
 
@@ -220,6 +229,11 @@ impl FontBuilder {
         if let Some(features) = self.features.as_ref() {
             attrs.insert(
                 pango::AttrFontFeatures::new(features.features.as_ref())
+            );
+        }
+        if let Some(line_height) = self.line_height {
+            attrs.insert(
+                pango::AttrFloat::new_line_height(line_height)
             );
         }
         Font { attrs }
