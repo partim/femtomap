@@ -294,6 +294,10 @@ impl<P> Hbox<P> {
         // sizes and just add up the horizontal size.
         let mut extents = Rect::default();
 
+        // Adjust for padding. Left padding is an initial advance.
+        let padding = self.properties.padding(style);
+        extents.x1 = padding.left;
+
         /*
         // Remember the horizontal position of the first explicit base if it
         // comes up.
@@ -313,13 +317,18 @@ impl<P> Hbox<P> {
             res
         }).collect();
 
+        // Add the remaining padding.
+        extents.x1 += padding.right;
+        extents.y0 -= padding.bottom;
+        extents.y1 += padding.top;
+
         let mut inner = Rect::default();
 
         if !children.is_empty() {
             // Determine the final left. This depends on the horizontal base.
             let mut left = match self.hbase {
-                Align::Start => 0.,
-                Align::Center => -extents.x1 / 2.,
+                Align::Start => padding.left,
+                Align::Center => -(extents.x1 / 2. - padding.left),
                 Align::Base => {
                     /*
                     match base {
@@ -329,7 +338,7 @@ impl<P> Hbox<P> {
                     */
                     children[0].outer.x0
                 }
-                Align::End => -extents.x1
+                Align::End => -(extents.x1 - padding.left),
             };
 
             // Now shift each child.
@@ -344,18 +353,39 @@ impl<P> Hbox<P> {
                 }
 
                 let top = match self.valign {
-                    Align::Start => -shape.outer.y0,
+                    Align::Start => -shape.outer.y0 + padding.top,
                     Align::Center => {
                         -shape.outer.height() / 2. - shape.outer.y0
                     }
                     Align::Base => 0.,
-                    Align::End => -shape.outer.y1,
+                    Align::End => -shape.outer.y1 - padding.bottom,
                 };
-                shape.shift(Vec2::new(left - shape.outer.x0, top));
+                shape.shift(
+                    Vec2::new(left - shape.outer.x0, top)
+                );
 
                 left += shape.outer.width();
                 inner = inner.union(shape.outer + shape.offset);
             });
+
+            match self.hbase {
+                Align::Start => inner.x1 += padding.right,
+                Align::Center => {
+                    inner.x0 -= padding.left;
+                    inner.x1 += padding.right
+                }
+                Align::Base =>  { },
+                Align::End => inner.x0 -= padding.left,
+            }
+            match self.valign {
+                Align::Start => inner.y1 += padding.bottom,
+                Align::Center => {
+                    inner.y1 += padding.bottom;
+                    inner.y0 -= padding.top;
+                }
+                Align::End => inner.y0 -= padding.top,
+                _ => { }
+            }
         }
 
         let (frame, outer) = frame_and_outer_extents(
