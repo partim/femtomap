@@ -46,19 +46,13 @@ pub trait Builtin: Sized {
         pos: ast::Pos, err: &mut Error,
     ) -> Result<Distance, Failed>;
 
-    /// Evaluates a builtin value as an import path.
-    fn eval_import_path<'s>(
-        value: Self::Value, scope: &'s Scope<Self>,
-        pos: ast::Pos, err: &mut Error
-    ) -> Result<&'s ImportPath, Failed>;
-
     /// Evaluates a function.
-    fn eval_function(
+    fn eval_function<'s>(
         name: &str,
         args: ArgumentList<Self>,
-        scope: &Scope<Self>,
+        scope: &Scope<'s, Self>,
         err: &mut Error,
-    ) -> Result<Value<Self>, Failed>;
+    ) -> Result<Value<'s, Self>, Failed>;
 
     /// Evaluates a procedure.
     fn eval_procedure(
@@ -91,7 +85,7 @@ pub struct Scope<'a, B: Builtin> {
     parent: Option<&'a Scope<'a, B>>,
 
     /// The local variables of this scope.
-    variables: HashMap<ShortString, Value<B>>,
+    variables: HashMap<ShortString, Value<'a, B>>,
 
     /// The builtin data for this scope.
     builtin: B::Scope,
@@ -112,18 +106,18 @@ impl<'a, B: Builtin> Scope<'a, B> {
         }
     }
 
-    pub fn set_var(&mut self, ident: ShortString, value: Value<B>) {
+    pub fn set_var(&mut self, ident: ShortString, value: Value<'a, B>) {
         self.variables.insert(ident.clone(), value);
     }
 
-    pub fn get_var(&self, ident: &str) -> Option<&Value<B>> {
+    pub fn get_var(&self, ident: &str) -> Option<&Value<'a, B>> {
         match self.variables.get(ident) {
             Some(value) => Some(value),
             None => self.parent.and_then(|parent| parent.get_var(ident))
         }
     }
 
-    pub fn get_var_cloned(&self, ident: &str) -> Option<Value<B>> {
+    pub fn get_var_cloned(&self, ident: &str) -> Option<Value<'a, B>> {
         self.get_var(ident).cloned()
     }
 
@@ -149,21 +143,21 @@ impl<'a, B: Builtin> Scope<'a, B> {
 ///
 /// It consists of a value and information about the source position which is
 /// necessary for error reporting.
-pub struct Expression<B: Builtin> {
+pub struct Expression<'a, B: Builtin> {
     /// The value of the expression.
-    pub value: Value<B>,
+    pub value: Value<'a, B>,
 
     /// The position of the start of the expression in the source.
     pub pos: ast::Pos,
 }
 
-impl<B: Builtin> Expression<B> {
-    fn new(value: Value<B>, pos: ast::Pos) -> Self {
+impl<'a, B: Builtin> Expression<'a, B> {
+    fn new(value: Value<'a, B>, pos: ast::Pos) -> Self {
         Expression { value, pos }
     }
 }
 
-impl<B: Builtin> Clone for Expression<B> {
+impl<'a, B: Builtin> Clone for Expression<'a, B> {
     fn clone(&self) -> Self {
         Self {
             value: self.value.clone(),
@@ -176,20 +170,21 @@ impl<B: Builtin> Clone for Expression<B> {
 //------------ Value ---------------------------------------------------------
 
 /// The value of an evaluated expression.
-pub enum Value<B: Builtin> {
+pub enum Value<'a, B: Builtin> {
     Color(Color),
     Distance(Distance),
-    List(Vec<Expression<B>>),
+    List(Vec<Expression<'a, B>>),
     Number(Number),
     Position(Position),
     SymbolSet(SymbolSet),
     Text(String),
     Trace(Trace),
     Vector((Distance, Distance)),
+    ImportPath(&'a ImportPath),
     Builtin(B::Value),
 }
 
-impl<B: Builtin> Clone for Value<B> {
+impl<'a, B: Builtin> Clone for Value<'a, B> {
     fn clone(&self) -> Self {
         use self::Value::*;
 
@@ -203,6 +198,7 @@ impl<B: Builtin> Clone for Value<B> {
             Text(value) => Text(value.clone()),
             Trace(value) => Trace(value.clone()),
             Vector(value) => Vector(value.clone()),
+            ImportPath(value) => ImportPath(*value),
             Builtin(value) => Builtin(value.clone()),
         }
     }
@@ -475,9 +471,9 @@ impl ast::AssignmentList {
 //------------ ArgumentList --------------------------------------------------
 
 impl ast::ArgumentList {
-    fn eval_args<B: Builtin>(
-        self, scope: &Scope<B>, err: &mut Error
-    ) -> Result<ArgumentList<B>, Failed> {
+    fn eval_args<'s, B: Builtin>(
+        self, scope: &Scope<'s, B>, err: &mut Error
+    ) -> Result<ArgumentList<'s, B>, Failed> {
         let mut good = true;
         let mut res = ArgumentList::new(self.pos);
         for argument in self.arguments {
@@ -510,9 +506,9 @@ impl ast::ArgumentList {
 //------------ Expression ----------------------------------------------------
 
 impl ast::Expression {
-    fn eval<B: Builtin>(
-        self, scope: &Scope<B>, err: &mut Error
-    ) -> Result<Expression<B>, Failed> {
+    fn eval<'s, B: Builtin>(
+        self, scope: &Scope<'s, B>, err: &mut Error
+    ) -> Result<Expression<'s, B>, Failed> {
         if self.fragments.len() == 1 {
             let first = self.fragments.into_iter().next().unwrap();
             Ok(Expression::new(first.1.eval(scope, err)?, self.pos))
@@ -571,9 +567,9 @@ impl ast::Expression {
 //------------ Fragment ------------------------------------------------------
 
 impl ast::Fragment {
-    fn eval<B: Builtin>(
-        self, scope: &Scope<B>, err: &mut Error
-    ) -> Result<Value<B>, Failed> {
+    fn eval<'s, B: Builtin>(
+        self, scope: &Scope<'s, B>, err: &mut Error
+    ) -> Result<Value<'s, B>, Failed> {
         match self {
             ast::Fragment::Complex(frag) => frag.eval(scope, err),
             ast::Fragment::List(frag) => frag.eval(scope, err),
@@ -600,9 +596,9 @@ impl ast::Fragment {
 //------------ Complex -------------------------------------------------------
 
 impl ast::Complex {
-    fn eval<B: Builtin>(
-        self, scope: &Scope<B>, err: &mut Error
-    ) -> Result<Value<B>, Failed> {
+    fn eval<'s, B: Builtin>(
+        self, scope: &Scope<'s, B>, err: &mut Error
+    ) -> Result<Value<'s, B>, Failed> {
         match self.section {
             Some(section) => {
                 let base = self.external.eval_import_path(scope, err)?;
@@ -630,9 +626,9 @@ impl ast::Complex {
 //------------ External ------------------------------------------------------
 
 impl ast::External {
-    fn eval<B: Builtin>(
-        self, scope: &Scope<B>, err: &mut Error
-    ) -> Result<Value<B>, Failed> {
+    fn eval<'s, B: Builtin>(
+        self, scope: &Scope<'s, B>, err: &mut Error
+    ) -> Result<Value<'s, B>, Failed> {
         let ident = self.ident.eval();
         match self.args {
             Some(args) => {
@@ -655,13 +651,11 @@ impl ast::External {
     }
 
     fn eval_import_path<'s, B: Builtin>(
-        self, scope: &'s Scope<B>, err: &mut Error
+        self, scope: &Scope<'s, B>, err: &mut Error
     ) -> Result<&'s ImportPath, Failed> {
         let pos = self.pos;
         match self.eval(scope, err)? {
-            Value::Builtin(value) => {
-                B::eval_import_path(value, scope, pos, err)
-            }
+            Value::ImportPath(value) => Ok(value),
             _ => {
                 err.add(pos, "expected import path");
                 Err(Failed)
@@ -677,7 +671,7 @@ impl ast::External {
             return Err(Failed)
         }
         match scope.get_var(self.ident.as_ref()) {
-            Some(&Value::Trace(ref path)) => Ok(PathComponent::Trace(path)),
+            Some(Value::Trace(path)) => Ok(PathComponent::Trace(path)),
             _ => {
                 err.add(self.pos, "expected path variable");
                 Err(Failed)
@@ -750,7 +744,7 @@ impl ast::Section {
     }
 
     fn eval_either<'s, B: Builtin>(
-        self, base: &ImportPath, scope: &'s Scope<B>, err: &mut Error
+        self, base: &ImportPath, scope: &Scope<'s, B>, err: &mut Error
     ) -> Result<PathComponent<'s>, Failed> {
         if self.end.is_some() {
             self.eval_subpath(base, scope, err).map(PathComponent::Subpath)
@@ -760,9 +754,9 @@ impl ast::Section {
         }
     }
 
-    fn eval<B: Builtin>(
-        self, base: &ImportPath, scope: &Scope<B>, err: &mut Error
-    ) -> Result<Value<B>, Failed> {
+    fn eval<'s, B: Builtin>(
+        self, base: &ImportPath, scope: &Scope<'s, B>, err: &mut Error
+    ) -> Result<Value<'s, B>, Failed> {
         if self.end.is_some() {
             self.eval_subpath(base, scope, err).map(|subpath| {
                 let mut path = Trace::new();
@@ -878,19 +872,70 @@ impl ast::Offset {
 //------------ Expressions ---------------------------------------------------
 
 impl ast::Expression {
-    fn eval_expression<B: Builtin>(
-        self, _scope: &Scope<B>, _err: &mut Error
-    ) -> Result<Expression<B>, Failed> {
-        unimplemented!()
+    fn eval_expression<'s, B: Builtin>(
+        self, scope: &Scope<'s, B>, err: &mut Error
+    ) -> Result<Expression<'s, B>, Failed> {
+        if self.fragments.len() == 1 {
+            let first = self.fragments.into_iter().next().unwrap();
+            Ok(Expression::new(first.1.eval(scope, err)?, self.pos))
+        }
+        else {
+            let mut path = Trace::new();
+            let mut fragments = self.fragments.into_iter();
+            while let Some((conn, frag)) = fragments.next() {
+                let (post, pre) = conn.tension();
+                match frag.eval_path_component(scope, err)? {
+                    PathComponent::Subpath(subpath) => {
+                        path.push_subpath(post, pre, subpath)
+                    }
+                    PathComponent::Position(pos) => {
+                        let (end_conn, end_frag) = match fragments.next() {
+                            Some(stuff) => stuff,
+                            None => {
+                                err.add(
+                                    self.pos,
+                                    "path ends after sole position"
+                                );
+                                return Err(Failed)
+                            }
+                        };
+                        if end_conn != ast::Connector::Straight {
+                            err.add(
+                                self.pos,
+                                "smooth connector in position pair"
+                            );
+                            return Err(Failed)
+                        }
+                        let end_pos = match end_frag.eval_path_component(
+                            scope, err
+                        )? {
+                            PathComponent::Position(pos) => pos,
+                            _ => {
+                                err.add(
+                                    self.pos,
+                                    "lone position in path definition"
+                                );
+                                return Err(Failed)
+                            }
+                        };
+                        path.push_edge(post, pre, Edge::new(pos, end_pos));
+                    }
+                    PathComponent::Trace(val) => {
+                        path.push_trace(post, pre, val)
+                    }
+                }
+            }
+            Ok(Expression::new(Value::Trace(path), self.pos))
+        }
     }
 }
 
 //------------ List ----------------------------------------------------------
 
 impl ast::List {
-    fn eval<B: Builtin>(
-        self, scope: &Scope<B>, err: &mut Error
-    ) -> Result<Value<B>, Failed> {
+    fn eval<'s, B: Builtin>(
+        self, scope: &Scope<'s, B>, err: &mut Error
+    ) -> Result<Value<'s, B>, Failed> {
         self.content.into_iter().fold(Ok(Vec::new()), |res, expr| {
             match (res, expr.eval_expression(scope, err)) {
                 (Ok(mut res), Ok(expr)) => {
@@ -906,9 +951,9 @@ impl ast::List {
 //------------ Vector --------------------------------------------------------
 
 impl ast::Vector {
-    fn eval<B: Builtin>(
-        self, scope: &Scope<B>, err: &mut Error
-    ) -> Result<Value<B>, Failed> {
+    fn eval<'s, B: Builtin>(
+        self, scope: &Scope<'s, B>, err: &mut Error
+    ) -> Result<Value<'s, B>, Failed> {
         self.eval_pair(scope, err).map(Value::Vector)
     }
 
@@ -924,9 +969,9 @@ impl ast::Vector {
 //------------ Atom ----------------------------------------------------------
 
 impl ast::Atom {
-    fn eval<B: Builtin>(
-        self, scope: &Scope<B>, err: &mut Error
-    ) -> Result<Value<B>, Failed> {
+    fn eval<'s, B: Builtin>(
+        self, scope: &Scope<'s, B>, err: &mut Error
+    ) -> Result<Value<'s, B>, Failed> {
         match self {
             ast::Atom::Number(atom) => atom.eval(),
             ast::Atom::SymbolSet(atom) => atom.eval(),
@@ -939,7 +984,7 @@ impl ast::Atom {
 //------------ Number --------------------------------------------------------
 
 impl ast::Number {
-    fn eval<B: Builtin>(self) -> Result<Value<B>, Failed> {
+    fn eval<'s, B: Builtin>(self) -> Result<Value<'s, B>, Failed> {
         if let Ok(value) = i32::from_str(&self.value) {
             Ok(Value::Number(Number::Int(value)))
         }
@@ -958,7 +1003,7 @@ impl ast::Number {
 //------------ SymbolSet -----------------------------------------------------
 
 impl ast::SymbolSet {
-    fn eval<B: Builtin>(self) -> Result<Value<B>, Failed> {
+    fn eval<'s, B: Builtin>(self) -> Result<Value<'s, B>, Failed> {
         Ok(Value::SymbolSet(SymbolSet::new(self)))
     }
 }
@@ -966,7 +1011,7 @@ impl ast::SymbolSet {
 //------------ Text ----------------------------------------------------------
 
 impl ast::Text {
-    fn eval<B: Builtin>(self) -> Result<Value<B>, Failed> {
+    fn eval<'s, B: Builtin>(self) -> Result<Value<'s, B>, Failed> {
         let mut res = self.first.content;
         self.others.into_iter().for_each(|val| res.push_str(&val.content));
         Ok(Value::Text(res))
@@ -976,9 +1021,9 @@ impl ast::Text {
 //------------ UnitNumber ----------------------------------------------------
 
 impl ast::UnitNumber {
-    fn eval<B: Builtin>(
-        self, scope: &Scope<B>, err: &mut Error
-    ) -> Result<Value<B>, Failed> {
+    fn eval<'s, B: Builtin>(
+        self, scope: &Scope<'s, B>, err: &mut Error
+    ) -> Result<Value<'s, B>, Failed> {
         self.eval_distance(scope, err).map(Value::Distance)
     }
 
@@ -1006,18 +1051,18 @@ impl ast::Identifier {
 //------------ ArgumentList --------------------------------------------------
 
 /// Evaluated arguments of a function.
-pub struct ArgumentList<B: Builtin> {
+pub struct ArgumentList<'a, B: Builtin> {
     /// The positional arguments.
-    positional: Vec<Expression<B>>,
+    positional: Vec<Expression<'a, B>>,
 
     /// The keyword arguments
-    keyword: HashMap<ast::Identifier, Expression<B>>,
+    keyword: HashMap<ast::Identifier, Expression<'a, B>>,
 
     /// The start of this argument list in its source.
     pos: ast::Pos,
 }
 
-impl<B: Builtin> ArgumentList<B> {
+impl<'a, B: Builtin> ArgumentList<'a, B> {
     fn new(pos: ast::Pos) -> Self {
         ArgumentList {
             positional: Vec::new(),
@@ -1038,7 +1083,7 @@ impl<B: Builtin> ArgumentList<B> {
         self,
         err: &mut Error,
         test: impl FnOnce(&Self, &mut Error) -> Result<bool, Failed>
-    ) -> Result<Vec<Expression<B>>, Result<Self, Failed>> {
+    ) -> Result<Vec<Expression<'a, B>>, Result<Self, Failed>> {
         if !self.keyword.is_empty() {
             err.add(self.pos, "expected positional arguments only");
             Err(Err(Failed))
@@ -1054,8 +1099,8 @@ impl<B: Builtin> ArgumentList<B> {
 
     pub fn into_positionals<const N: usize>(
         self, err: &mut Error
-    ) -> Result<[Expression<B>; N], Failed>
-    where [Expression<B>; N]: Default {
+    ) -> Result<[Expression<'a, B>; N], Failed>
+    where [Expression<'a, B>; N]: Default {
         if !self.keyword.is_empty() {
             err.add(self.pos, "expected positional arguments only");
             return Err(Failed)
@@ -1068,7 +1113,7 @@ impl<B: Builtin> ArgumentList<B> {
             return Err(Failed)
         }
 
-        // XXX This could be more efficient unsing MaybeUninit but
+        // XXX This could be more efficient using MaybeUninit but
         //     mem::transmute doesn’t seem to like const generics just yet.
         //     Or I am doing something wrong.
 
@@ -1088,7 +1133,7 @@ impl<B: Builtin> ArgumentList<B> {
     /// arguments.
     pub fn into_n_positionals(
         self, n: usize, err: &mut Error
-    ) -> Result<Vec<Expression<B>>, Result<ArgumentList<B>, Failed>> {
+    ) -> Result<Vec<Expression<'a, B>>, Result<ArgumentList<'a, B>, Failed>> {
         self.into_var_positionals(err, |args, err| {
             match n.cmp(&args.positional().len()) {
                 Ordering::Greater => Ok(false),
@@ -1107,14 +1152,14 @@ impl<B: Builtin> ArgumentList<B> {
     /// Returns the only positional argument.
     pub fn into_sole_positional(
         self, err: &mut Error
-    ) -> Result<Expression<B>, Result<ArgumentList<B>, Failed>> {
+    ) -> Result<Expression<'a, B>, Result<ArgumentList<'a, B>, Failed>> {
         self.into_n_positionals(1, err).map(|mut res| res.pop().unwrap())
     }
 
     /// Returns the only positional argument if there is one.
     pub fn into_opt_sole_position(
         self, err: &mut Error
-    ) -> Result<Option<Expression<B>>, Failed> {
+    ) -> Result<Option<Expression<'a, B>>, Failed> {
         if !self.keyword.is_empty() {
             err.add(self.pos, "expected zero or one positional arguments");
             return Err(Failed)
@@ -1143,12 +1188,12 @@ impl<B: Builtin> ArgumentList<B> {
     }
 
     /// Returns a keyword argument.
-    pub fn get_keyword(&self, key: &str) -> Option<&Expression<B>> {
+    pub fn get_keyword(&self, key: &str) -> Option<&Expression<'a, B>> {
         self.keyword.get(key)
     }
 }
 
-impl<B: Builtin> Clone for ArgumentList<B> {
+impl<'a, B: Builtin> Clone for ArgumentList<'a, B> {
     fn clone(&self) -> Self {
         ArgumentList {
             positional: self.positional.clone(),
