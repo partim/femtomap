@@ -4,6 +4,7 @@ use std::{cmp, ops};
 use std::f64::consts::PI;
 use std::sync::Arc;
 use kurbo::{CubicBez, Line, ParamCurveArclen, Point, TranslateScale, Vec2};
+use smallvec::SmallVec;
 use super::trace::{STORAGE_ACCURACY, Segment};
 
 //----------- TEMPORARY ------------------------------------------------------
@@ -100,7 +101,7 @@ pub struct Path {
     /// The elements of the stored path.
     ///
     /// For simplicity, we keep the initial point as an element, too.
-    elements: Arc<Box<[Element]>>,
+    elements: Arc<[Element]>,
 }
 
 impl Path {
@@ -111,14 +112,14 @@ impl Path {
 
     /// Returns the minimum valid location on the path.
     pub fn min_location(&self) -> Location {
-        Location::new(SegTime::new(1, 0.), Vec::new())
+        Location::new(SegTime::new(1, 0.), Default::default())
     }
 
     /// Returns the last valid location of the path.
     pub fn max_location(&self) -> Location {
         Location::new(
             SegTime::new(self.elements.len() as u32 - 1, 1.),
-            Vec::new(),
+            Default::default(),
         )
     }
 
@@ -364,7 +365,7 @@ impl PathBuilder {
     /// Finishes the builder and converts it into a stored path.
     pub fn finish(self) -> Path {
         Path {
-            elements: Arc::new(self.elements.into_boxed_slice())
+            elements: self.elements.into()
         }
     }
 }
@@ -461,6 +462,12 @@ impl MapDistance {
 }
 
 
+//------------ MapDistanceVec ------------------------------------------------
+
+/// The types used for a sequence of map distances.
+pub type MapDistanceVec = SmallVec<[MapDistance; 1]>;
+
+
 //------------ Distance ------------------------------------------------------
 
 /// Describes a distance from a point.
@@ -481,13 +488,14 @@ pub struct Distance {
     /// The map component of the distance.
     ///
     /// Since map distances can only be interpreted at rendering time, we
-    /// need to keep all the given values.
-    pub map: Vec<MapDistance>,
+    /// need to keep all the given values. The resolved map distance is the
+    /// sum of the resolved individual distances in the vec.
+    pub map: MapDistanceVec,
 }
 
 impl Distance {
     /// Creates a new distance from the world and canvas components.
-    pub fn new(world: Option<f64>, map: Vec<MapDistance>) -> Self {
+    pub fn new(world: Option<f64>, map: MapDistanceVec) -> Self {
         Distance { world, map }
     }
 
@@ -515,7 +523,7 @@ impl Distance {
 
 impl Default for Distance {
     fn default() -> Self {
-        Distance { world: None, map: Vec::new() }
+        Distance { world: None, map: Default::default() }
     }
 }
 
@@ -616,12 +624,12 @@ pub struct Location {
     ///
     /// Positive values are further along the path, negative values are
     /// backwards on the path.
-    pub map: Vec<MapDistance>,
+    pub map: MapDistanceVec,
 }
 
 impl Location {
     /// Creates a new location from its components.
-    pub fn new(world: SegTime, map: Vec<MapDistance>) -> Self {
+    pub fn new(world: SegTime, map: MapDistanceVec) -> Self {
         Location { world, map }
     }
 }
