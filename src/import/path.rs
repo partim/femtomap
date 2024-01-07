@@ -1,31 +1,34 @@
-use std::{fmt, io, iter, slice};
-use std::collections::HashMap;
-use std::f64::INFINITY;
+use std::{fmt, io, iter, mem, path, slice};
+use std::collections::{HashMap, HashSet};
 use std::f64::consts::PI;
+use std::fs::File;
+use std::path::Path as FsPath;
 use std::str::FromStr;
+use std::sync::Mutex;
+use ignore::{WalkBuilder, WalkState};
+use ignore::types::TypesBuilder;
 use kurbo::Vec2;
 use osmxml::elements::{MemberType, Osm, Relation, Way};
+use osmxml::read::read_xml;
 use crate::path::Path;
 use crate::mp_path;
 
 
-/*
-//------------ PathSet -------------------------------------------------------
+//------------ ImportPathSet -------------------------------------------------
 
 #[derive(Clone, Debug, Default)]
-pub struct PathSet {
-    paths: Vec<ImportPath>,
-    names: HashMap<String, usize>,
+pub struct ImportPathSet {
+    paths: HashMap<String, ImportPath>,
 }
 
-impl PathSet {
+impl ImportPathSet {
     pub fn load(path: &FsPath) -> Result<Self, PathSetError> {
         let mut types = TypesBuilder::new();
         types.add("osm", "*.osm").unwrap();
         let walk = WalkBuilder::new(path)
             .types(types.select("osm").build().unwrap())
             .build_parallel();
-        let res = Mutex::new(PathSet::default());
+        let res = Mutex::new(Self::default());
         let errors = Mutex::new(PathSetError::new());
         walk.run(|| {
             Box::new(|path| {
@@ -68,10 +71,9 @@ impl PathSet {
                     match ImportPath::from_osm(relation, &osm) {
                         Ok((key, path)) => {
                             {
-                                let mut res = res.lock().unwrap();
-                                let idx = res.paths.len();
-                                res.names.insert(key, idx);
-                                res.paths.push(path);
+                                res.lock().expect(
+                                    "poisoned lock"
+                                ).paths.insert(key, path);
                             }
                         }
                         Err(err) => {
@@ -88,21 +90,16 @@ impl PathSet {
         Ok(res.into_inner().unwrap())
     }
 
-    pub fn lookup(&self, key: &str) -> Option<usize> {
-        self.names.get(key).cloned()
-    }
-
-    pub fn get(&self, idx: usize) -> Option<&ImportPath> {
-        self.paths.get(idx)
+    pub fn lookup(&self, key: &str) -> Option<&ImportPath> {
+        self.paths.get(key)
     }
 
     pub fn iter<'a>(
         &'a self
     ) -> impl Iterator<Item = &'a ImportPath> {
-        self.paths.iter()
+        self.paths.values()
     }
 }
-*/
 
 
 //------------ ImportPath ----------------------------------------------------
@@ -204,7 +201,7 @@ impl ImportPath {
             let tension = match way.tags().get("type") {
                 None => 1.,
                 Some("curved") | Some("arc") => 1.,
-                Some("straight") => INFINITY,
+                Some("straight") => f64::INFINITY,
                 Some(value) => {
                     err.add(Error::IllegalWayType {
                         rel: key.clone(),
@@ -366,8 +363,8 @@ impl<'a> Iterator for WayIter<'a> {
     }
 }
 
+//============ Errors ========================================================
 
-/*
 //------------ PathSetError --------------------------------------------------
 
 #[derive(Default)]
@@ -410,7 +407,7 @@ impl fmt::Display for PathSetError {
         Ok(())
     }
 }
-*/
+
 
 //------------ PathError -----------------------------------------------------
 

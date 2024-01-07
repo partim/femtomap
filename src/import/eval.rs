@@ -42,33 +42,39 @@ pub trait Builtin: Sized {
 
     /// Evaluates a distance.
     fn eval_distance(
+        &self,
         number: f64, unit: &str, scope: &Scope<Self>,
         pos: ast::Pos, err: &mut Error,
     ) -> Result<Distance, Failed>;
 
     /// Evaluates a function.
     fn eval_function<'s>(
+        &self,
         name: &str,
         args: ArgumentList<Self>,
         scope: &Scope<'s, Self>,
+        pos: ast::Pos,
         err: &mut Error,
     ) -> Result<Value<'s, Self>, Failed>;
 
     /// Evaluates a procedure.
     fn eval_procedure(
+        &self,
         name: &str,
         args: ArgumentList<Self>,
         target: &mut Self::Target,
         scope: &Scope<Self>,
+        pos: ast::Pos,
         err: &mut Error,
     ) -> Result<(), Failed>;
 
     /// Evaluates an assignment to a render parameter.
     fn eval_render_param(
+        &self,
         name: &str,
         value: Expression<Self>,
         scope: &mut Scope<Self>,
-        err: &mut Error
+        pos: ast::Pos, err: &mut Error
     ) -> Result<(), Failed>;
 }
 
@@ -81,28 +87,35 @@ pub trait Builtin: Sized {
 /// parameter assignments. Since it inherits all assignments from the outer
 /// block, the scope optionally keeps a reference to the parent scope.
 pub struct Scope<'a, B: Builtin> {
+    /// A reference to the builtin.
+    builtin: &'a B,
+
     /// The optional parent scope.
     parent: Option<&'a Scope<'a, B>>,
 
     /// The local variables of this scope.
     variables: HashMap<ShortString, Value<'a, B>>,
 
-    /// The builtin data for this scope.
-    builtin: B::Scope,
-}
-
-impl<'a, B: Builtin> Default for Scope<'a, B> {
-    fn default() -> Self {
-        Self::new(None)
-    }
+    /// The builtin’s data for this scope.
+    custom: B::Scope,
 }
 
 impl<'a, B: Builtin> Scope<'a, B> {
-    pub fn new(parent: Option<&'a Scope<'a, B>>) -> Self {
+    pub fn root(builtin: &'a B) -> Self {
         Self {
-            parent,
+            builtin,
+            parent: None,
             variables: Default::default(),
-            builtin: Default::default(),
+            custom: Default::default(),
+        }
+    }
+
+    pub fn new(parent: &'a Scope<'a, B>) -> Self {
+        Self {
+            builtin: parent.builtin,
+            parent: Some(parent),
+            variables: Default::default(),
+            custom: Default::default(),
         }
     }
 
@@ -121,16 +134,16 @@ impl<'a, B: Builtin> Scope<'a, B> {
         self.get_var(ident).cloned()
     }
 
-    pub fn builtin(&self) -> &B::Scope {
-        &self.builtin
+    pub fn custom(&self) -> &B::Scope {
+        &self.custom
     }
 
-    pub fn builtin_mut(&mut self) -> &mut B::Scope {
-        &mut self.builtin
+    pub fn custom_mut(&mut self) -> &mut B::Scope {
+        &mut self.custom
     }
 
-    pub fn parent_builtin(&self) -> Option<&B::Scope> {
-        self.parent.map(|parent| parent.builtin())
+    pub fn parent(&self) -> Option<&Self> {
+        self.parent
     }
 }
 
@@ -154,6 +167,154 @@ pub struct Expression<'a, B: Builtin> {
 impl<'a, B: Builtin> Expression<'a, B> {
     fn new(value: Value<'a, B>, pos: ast::Pos) -> Self {
         Expression { value, pos }
+    }
+
+    pub fn into_color(
+        self, err: &mut Error
+    ) -> Result<(Color, ast::Pos), Failed> {
+        match self.value {
+            Value::Color(val) => Ok((val, self.pos)),
+            _ => {
+                err.add(self.pos, "expected distance");
+                Err(Failed)
+            }
+        }
+    }
+
+    pub fn into_distance(
+        self, err: &mut Error
+    ) -> Result<(Distance, ast::Pos), Failed> {
+        match self.value {
+            Value::Distance(val) => Ok((val, self.pos)),
+            _ => {
+                err.add(self.pos, "expected distance");
+                Err(Failed)
+            }
+        }
+    }
+
+    pub fn into_number(
+        self, err: &mut Error
+    ) -> Result<(Number, ast::Pos), Failed> {
+        match self.value {
+            Value::Number(val) => Ok((val, self.pos)),
+            _ => {
+                err.add(self.pos, "expected number");
+                Err(Failed)
+            }
+        }
+    }
+
+    pub fn into_f64(
+        self, err: &mut Error
+    ) -> Result<(f64, ast::Pos), Failed> {
+        self.into_number(err).map(|(val, pos)| (val.into_f64(), pos))
+    }
+
+    pub fn into_u8(
+        self, err: &mut Error
+    ) -> Result<(u8, ast::Pos), Failed> {
+        let (val, pos) = self.into_number(err)?;
+        match val.into_u8() {
+            Ok(val) => Ok((val, pos)),
+            Err(msg) => {
+                err.add(pos, msg);
+                Err(Failed)
+            }
+        }
+    }
+
+    pub fn into_i16(
+        self, err: &mut Error
+    ) -> Result<(i16, ast::Pos), Failed> {
+        let (val, pos) = self.into_number(err)?;
+        match val.into_i16() {
+            Ok(val) => Ok((val, pos)),
+            Err(msg) => {
+                err.add(pos, msg);
+                Err(Failed)
+            }
+        }
+    }
+
+    pub fn into_trace(
+        self, err: &mut Error
+    ) -> Result<(Trace, ast::Pos), Failed> {
+        match self.value {
+            Value::Trace(val) => Ok((val, self.pos)),
+            _ => {
+                err.add(self.pos, "expected path");
+                Err(Failed)
+            }
+        }
+    }
+
+    pub fn into_position(
+        self, err: &mut Error
+    ) -> Result<(Position, ast::Pos), Failed> {
+        match self.value {
+            Value::Position(val) => Ok((val, self.pos)),
+            _ => {
+                err.add(self.pos, "expected position");
+                Err(Failed)
+            }
+        }
+    }
+
+    pub fn into_symbol(
+        self, err: &mut Error
+    ) -> Result<(ShortString, ast::Pos), Failed> {
+        match self.value {
+            Value::SymbolSet(set) => {
+                if set.len() != 1 {
+                    err.add(self.pos, "expected exactly one symbol");
+                    Err(Failed)
+                }
+                else {
+                    Ok((set.into_iter().next().unwrap(), self.pos))
+                }
+            }
+            _ => {
+                err.add(self.pos, "expected symbol");
+                Err(Failed)
+            }
+        }
+    }
+
+    pub fn into_symbol_set(
+        self, err: &mut Error
+    ) -> Result<SymbolSet, Failed> {
+        match self.value {
+            Value::SymbolSet(val) => Ok(val),
+            _ => {
+                err.add(self.pos, "expected symbol set");
+                Err(Failed)
+            }
+        }
+    }
+
+    pub fn into_text(
+        self, err: &mut Error
+    ) -> Result<(String, ast::Pos), Failed> {
+        match self.value {
+            Value::Text(val) => Ok((val, self.pos)),
+            _ => {
+                err.add(self.pos, "expected text");
+                Err(Failed)
+            }
+        }
+    }
+
+    pub fn into_vector(
+        self, err: &mut Error
+    ) -> Result<((Distance, Distance), ast::Pos), Failed> {
+        match self.value {
+            Value::Vector(val) => Ok((val, self.pos)),
+            _ => {
+                err.add(self.pos, "expected a vector");
+                Err(Failed)
+            }
+        }
     }
 }
 
@@ -181,7 +342,7 @@ pub enum Value<'a, B: Builtin> {
     Trace(Trace),
     Vector((Distance, Distance)),
     ImportPath(&'a ImportPath),
-    Builtin(B::Value),
+    Custom(B::Value),
 }
 
 impl<'a, B: Builtin> Clone for Value<'a, B> {
@@ -199,7 +360,7 @@ impl<'a, B: Builtin> Clone for Value<'a, B> {
             Trace(value) => Trace(value.clone()),
             Vector(value) => Vector(value.clone()),
             ImportPath(value) => ImportPath(*value),
-            Builtin(value) => Builtin(value.clone()),
+            Custom(value) => Custom(value.clone()),
         }
     }
 }
@@ -398,7 +559,7 @@ impl ast::Statement {
             }
             ast::Statement::With(stm) => stm.eval(target, scope, err),
             ast::Statement::Block(stm) => {
-                stm.eval(target, &mut Scope::new(Some(scope)), err)
+                stm.eval(target, &mut Scope::new(scope), err)
             }
         }
     }
@@ -425,9 +586,12 @@ impl ast::Procedure {
     fn eval<B: Builtin>(
         self, target: &mut B::Target, scope: &mut Scope<B>, err: &mut Error
     ) -> Result<(), Failed> {
+        let pos = self.ident.pos;
         let ident = self.ident.eval();
         let args = self.args.eval_args(scope, err)?;
-        B::eval_procedure(ident.as_ref(), args, target, scope, err)
+        scope.builtin.eval_procedure(
+            ident.as_ref(), args, target, scope, pos, err
+        )
     }
 }
 
@@ -441,7 +605,7 @@ impl ast::With {
         err: &mut Error
     ) {
         // We need our own scope.
-        let mut scope = Scope::new(Some(scope));
+        let mut scope = Scope::new(scope);
 
         // Next we update the render params from self.params.
         self.params.eval(&mut scope, err);
@@ -456,13 +620,14 @@ impl ast::With {
 impl ast::AssignmentList {
     fn eval<B: Builtin>(self, scope: &mut Scope<B>, err: &mut Error) {
         for item in self.assignments {
+            let pos = item.target.pos;
             let target = item.target.eval();
             let expression = match item.expression.eval(&scope, err) {
                 Ok(expression) => expression,
                 Err(_) => continue,
             };
-            let _ = B::eval_render_param(
-                target.as_ref(), expression, scope, err
+            let _ = scope.builtin.eval_render_param(
+                target.as_ref(), expression, scope, pos, err
             );
         }
     }
@@ -629,11 +794,14 @@ impl ast::External {
     fn eval<'s, B: Builtin>(
         self, scope: &Scope<'s, B>, err: &mut Error
     ) -> Result<Value<'s, B>, Failed> {
+        let pos = self.ident.pos;
         let ident = self.ident.eval();
         match self.args {
             Some(args) => {
                 let args = args.eval_args(scope, err)?;
-                B::eval_function(ident.as_ref(), args, scope, err)
+                scope.builtin.eval_function(
+                    ident.as_ref(), args, scope, pos, err
+                )
             }
             None => {
                 match scope.get_var_cloned(ident.as_ref()) {
@@ -1030,7 +1198,7 @@ impl ast::UnitNumber {
     fn eval_distance<B: Builtin>(
         self, scope: &Scope<B>, err: &mut Error
     ) -> Result<Distance, Failed> {
-        B::eval_distance(
+        scope.builtin.eval_distance(
             self.number.eval_float(), self.unit.as_ref(), scope,
             self.pos, err
         )
