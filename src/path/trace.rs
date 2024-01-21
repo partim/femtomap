@@ -7,9 +7,10 @@ use kurbo::{
     DEFAULT_ACCURACY, CubicBez, Line, Rect, ParamCurve,
     ParamCurveArclen, ParamCurveExtrema, PathEl, PathSeg, Point, Vec2
 };
+use crate::world;
 use crate::mp_path::velocity;
 use crate::render::outline::{Outline, OutlineIter};
-use super::path::{Distance, Location, SegTime, Style, Path};
+use super::path::{Distance, Location, SegTime, Transform, Path};
 
 
 //------------ Configuration Constants ---------------------------------------
@@ -57,39 +58,41 @@ impl Trace {
         self.parts.extend_from_slice(&trace.parts[1..]);
     }
 
-    pub fn outline(&self, style: &impl Style) -> Outline {
-        Outline::from_iter(self.segments(style))
+    pub fn outline(&self, transform: &impl Transform) -> Outline {
+        Outline::from_iter(self.segments(transform))
     }
 
-    pub fn outline_offset(&self, offset: f64, style: &impl Style) -> Outline {
-        Outline::from_iter(self.offset_segments(offset, style))
+    pub fn outline_offset(
+        &self, offset: f64, transform: &impl Transform
+    ) -> Outline {
+        Outline::from_iter(self.offset_segments(offset, transform))
     }
 
     pub fn iter_outline<'s>(
-        &'s self, style: &'s impl Style
+        &'s self, transform: &'s impl Transform
     ) -> OutlineIter<impl Iterator<Item = PathEl> + 's> {
-        OutlineIter(self.elements(style))
+        OutlineIter(self.elements(transform))
     }
 
     pub fn iter_outline_offset<'s>(
-        &'s self, offset: f64, style: &'s impl Style
+        &'s self, offset: f64, transform: &'s impl Transform
     ) -> OutlineIter<impl Iterator<Item = PathEl> + 's> {
-        OutlineIter(self.offset_elements(offset, style))
+        OutlineIter(self.offset_elements(offset, transform))
     }
 
     pub fn elements<'s>(
-        &'s self, style: &'s impl Style
+        &'s self, transform: &'s impl Transform
     ) -> impl Iterator<Item = PathEl> + 's {
-        let mut segments = self.segments(style).peekable();
+        let mut segments = self.segments(transform).peekable();
         iter::once(segments.peek().unwrap().start_element()).chain(
             segments.map(|seg| seg.tail_element())
         )
     }
 
     pub fn offset_elements<'s>(
-        &'s self, offset: f64, style: &'s impl Style
+        &'s self, offset: f64, transform: &'s impl Transform
     ) -> impl Iterator<Item = PathEl> + 's {
-        let mut segments = self.segments(style).peekable();
+        let mut segments = self.segments(transform).peekable();
         iter::once(
             segments.peek().unwrap().offset(offset).start_element()
         ).chain(
@@ -97,38 +100,38 @@ impl Trace {
         )
     }
 
-    pub fn storage_bounds(&self) -> Rect {
+    pub fn storage_bounds(&self) -> world::Rect {
         let mut parts = self.parts.iter();
         let mut res = parts.next().unwrap().2.storage_bounds();
         for item in parts {
             res = res.union(item.2.storage_bounds())
         }
-        res
+        res.into()
     }
 
     fn parts(&self) -> PartsIter {
         self.parts.iter()
     }
 
-    pub fn segments<'a, S: Style>(
-        &'a self, style: &'a S,
+    pub fn segments<'a, S: Transform>(
+        &'a self, transform: &'a S,
     ) -> SegmentIter<'a, S> {
-        SegmentIter::new(self, style)
+        SegmentIter::new(self, transform)
     }
 
-    pub fn offset_segments<'a, S: Style>(
-        &'a self, offset: f64, style: &'a S,
+    pub fn offset_segments<'a, S: Transform>(
+        &'a self, offset: f64, transform: &'a S,
     ) -> impl Iterator<Item = Segment> + 'a {
-        SegmentIter::new(self, style).map(move |seg| seg.offset(offset))
+        SegmentIter::new(self, transform).map(move |seg| seg.offset(offset))
     }
 
     /*
-    pub fn partitions<'a, S: Style>(
-        &'a self, part_len: f64, style: &'a S,
+    pub fn partitions<'a, S: Transform>(
+        &'a self, part_len: f64, transform: &'a S,
     ) -> PartitionIter<'a, S> {
         PartitionIter::new(
-            self.segments(style),
-            part_len * style.transform().canvas_bp()
+            self.segments(transform),
+            part_len * transform.transform().canvas_bp()
         )
     }
     */
@@ -159,24 +162,24 @@ pub struct SegmentIter<'a, S> {
     /// This is necessary to build the connection between parts.
     last_seg: Option<Segment>,
 
-    /// The style for determining distances.
-    style: &'a S,
+    /// The transform for determining distances.
+    transform: &'a S,
 }
 
-impl<'a, S: Style> SegmentIter<'a, S> {
-    fn new(path: &'a Trace, style: &'a S) -> Self {
+impl<'a, S: Transform> SegmentIter<'a, S> {
+    fn new(path: &'a Trace, transform: &'a S) -> Self {
         let mut next_part = path.parts();
         let &(_, _, ref part) = next_part.next().unwrap();
         SegmentIter {
             next_part,
-            next_seg: part.iter(style),
+            next_seg: part.iter(transform),
             last_seg: None,
-            style,
+            transform,
         }
     }
 }
 
-impl<'a, S: Style> Iterator for SegmentIter<'a, S> {
+impl<'a, S: Transform> Iterator for SegmentIter<'a, S> {
     type Item = Segment;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -191,7 +194,7 @@ impl<'a, S: Style> Iterator for SegmentIter<'a, S> {
                 //
                 // Grab the next part or return if we are done.
                 let &(post, pre, ref part) = self.next_part.next()?;
-                self.next_seg = part.iter(self.style);
+                self.next_seg = part.iter(self.transform);
 
                 // We need to produce a connection between the last and next
                 // segment.
@@ -252,12 +255,12 @@ impl<'a, S> PartitionIter<'a, S> {
     ///
     /// The length is given in _bp_.
     pub fn set_part_len(&mut self, part_len: f64)
-    where S: Style {
-        self.part_len = part_len * self.next_seg.style.transform().canvas_bp();
+    where S: Transform {
+        self.part_len = part_len * self.next_seg.transform.transform().canvas_bp();
     }
 }
 
-impl<'a, S: Style> Iterator for PartitionIter<'a, S> {
+impl<'a, S: Transform> Iterator for PartitionIter<'a, S> {
     type Item = crate::render::Outline;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -320,15 +323,15 @@ impl Section {
         }
     }
 
-    fn iter<'a, S: Style>(
-        &'a self, style: &'a S,
+    fn iter<'a, S: Transform>(
+        &'a self, transform: &'a S,
     ) -> SectionSegmentIter<'a, S> {
         match *self {
             Section::Subpath(ref subpath) => {
-                SectionSegmentIter::Subpath(subpath.iter(style))
+                SectionSegmentIter::Subpath(subpath.iter(transform))
             }
             Section::Edge(ref line) => {
-                SectionSegmentIter::Edge(line.iter(style))
+                SectionSegmentIter::Edge(line.iter(transform))
             }
         }
     }
@@ -356,7 +359,7 @@ impl<'a, S> Clone for SectionSegmentIter<'a, S> {
     }
 }
 
-impl<'a, S: Style> Iterator for SectionSegmentIter<'a, S> {
+impl<'a, S: Transform> Iterator for SectionSegmentIter<'a, S> {
     type Item = Segment;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -450,10 +453,10 @@ impl Subpath {
         }
     }
 
-    fn iter<'a, S: Style>(
-        &'a self, style: &'a S,
+    fn iter<'a, S: Transform>(
+        &'a self, transform: &'a S,
     ) -> SubpathSegmentIter<'a, S> {
-        SubpathSegmentIter::new(self, style)
+        SubpathSegmentIter::new(self, transform)
     }
 }
 
@@ -466,8 +469,8 @@ pub struct SubpathSegmentIter<'a, S> {
     /// The subpath we are working on.
     subpath: &'a Subpath,
 
-    /// The style for determining distances.
-    style: &'a S,
+    /// The transform for determining distances.
+    transform: &'a S,
 
     /// Is this subpath forward or backward over the base path?
     forward: bool,
@@ -497,7 +500,7 @@ impl<'a, S> Clone for SubpathSegmentIter<'a, S> {
     fn clone(&self) -> Self {
         SubpathSegmentIter {
             subpath: self.subpath,
-            style: self.style,
+            transform: self.transform,
             forward: self.forward,
             first: self.first,
             middle: self.middle,
@@ -506,21 +509,21 @@ impl<'a, S> Clone for SubpathSegmentIter<'a, S> {
     }
 }
 
-impl<'a, S: Style> SubpathSegmentIter<'a, S> {
-    fn new(subpath: &'a Subpath, style: &'a S) -> Self {
-        let start = subpath.path.location_time(&subpath.start, style);
-        let end = subpath.path.location_time(&subpath.end, style);
+impl<'a, S: Transform> SubpathSegmentIter<'a, S> {
+    fn new(subpath: &'a Subpath, transform: &'a S) -> Self {
+        let start = subpath.path.location_time(&subpath.start, transform);
+        let end = subpath.path.location_time(&subpath.end, transform);
 
         if start < end {
-            Self::new_forward(subpath, style, start, end)
+            Self::new_forward(subpath, transform, start, end)
         }
         else {
-            Self::new_reverse(subpath, style, start, end)
+            Self::new_reverse(subpath, transform, start, end)
         }
     }
 
     fn new_forward(
-        subpath: &'a Subpath, style: &'a S,
+        subpath: &'a Subpath, transform: &'a S,
         start: SegTime, mut end: SegTime
     ) -> Self {
         if end.time == 0. {
@@ -531,7 +534,7 @@ impl<'a, S: Style> SubpathSegmentIter<'a, S> {
                 Some(
                     subpath.path.segment(start.seg).unwrap().sub(
                         start.time, end.time
-                    ).transf_off(style, subpath.offset.as_ref())
+                    ).transf_off(transform, subpath.offset.as_ref())
                 ),
                 None,
                 None
@@ -540,7 +543,7 @@ impl<'a, S: Style> SubpathSegmentIter<'a, S> {
         else {
             (
                 Some(subpath.path.segment_after(start).transf_off(
-                    style, subpath.offset.as_ref()
+                    transform, subpath.offset.as_ref()
                 )),
                 if start.seg + 2 > end.seg {
                     None
@@ -552,14 +555,14 @@ impl<'a, S: Style> SubpathSegmentIter<'a, S> {
             )
         };
         SubpathSegmentIter {
-            subpath, style,
+            subpath, transform,
             forward: true,
             first, middle, last
         }
     }
 
     fn new_reverse(
-        subpath: &'a Subpath, style: &'a S,
+        subpath: &'a Subpath, transform: &'a S,
         mut start: SegTime, end: SegTime
     ) -> Self {
         if start.time == 0. && start.seg > 1 {
@@ -570,7 +573,7 @@ impl<'a, S: Style> SubpathSegmentIter<'a, S> {
                 Some(
                     subpath.path.segment(start.seg).unwrap().sub(
                         end.time, start.time
-                    ).rev().transf_off(style, subpath.offset.as_ref())
+                    ).rev().transf_off(transform, subpath.offset.as_ref())
                 ),
                 None,
                 None
@@ -579,7 +582,7 @@ impl<'a, S: Style> SubpathSegmentIter<'a, S> {
         else {
             (
                 Some(subpath.path.segment_before(start).rev().transf_off(
-                    style, subpath.offset.as_ref()
+                    transform, subpath.offset.as_ref()
                 )),
                 if end.seg + 2 > start.seg {
                     None
@@ -591,7 +594,7 @@ impl<'a, S: Style> SubpathSegmentIter<'a, S> {
             )
         };
         SubpathSegmentIter {
-            subpath, style,
+            subpath, transform,
             forward: false,
             first, middle, last
         }
@@ -603,7 +606,7 @@ impl<'a, S: Style> SubpathSegmentIter<'a, S> {
         }
         if let Some((start, end)) = self.middle {
             let seg = self.subpath.path.segment(start).unwrap().transf_off(
-                self.style, self.subpath.offset.as_ref()
+                self.transform, self.subpath.offset.as_ref()
             );
             let start = start + 1;
             self.middle = if start > end {
@@ -617,7 +620,7 @@ impl<'a, S: Style> SubpathSegmentIter<'a, S> {
         if let Some(end) = self.last.take() {
             return Some(
                 self.subpath.path.segment_before(end).transf_off(
-                    self.style, self.subpath.offset.as_ref()
+                    self.transform, self.subpath.offset.as_ref()
                 )
             )
         }
@@ -632,7 +635,7 @@ impl<'a, S: Style> SubpathSegmentIter<'a, S> {
             let seg = self.subpath.path.segment(
                 start
             ).unwrap().rev().transf_off(
-               self.style, self.subpath.offset.as_ref()
+               self.transform, self.subpath.offset.as_ref()
             );
             let start = start - 1;
             self.middle = if start < end {
@@ -646,7 +649,7 @@ impl<'a, S: Style> SubpathSegmentIter<'a, S> {
         if let Some(end) = self.last.take() {
             return Some(
                 self.subpath.path.segment_after(end).rev().transf_off(
-                    self.style, self.subpath.offset.as_ref()
+                    self.transform, self.subpath.offset.as_ref()
                 )
             )
         }
@@ -654,7 +657,7 @@ impl<'a, S: Style> SubpathSegmentIter<'a, S> {
     }
 }
 
-impl<'a, S: Style> Iterator for SubpathSegmentIter<'a, S> {
+impl<'a, S: Transform> Iterator for SubpathSegmentIter<'a, S> {
     type Item = Segment;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -683,17 +686,17 @@ impl Edge {
     }
 
     fn storage_bounds(&self) -> Rect {
-        self.start.storage_bounds().union(
-            self.end.storage_bounds()
+        self.start._storage_bounds().union(
+            self.end._storage_bounds()
         )
     }
 
     fn iter<'a, S>(
-        &'a self, style: &'a S
+        &'a self, transform: &'a S
     ) -> EdgeSegmentIter<'a, S> {
         EdgeSegmentIter {
             line: Some(self),
-            style,
+            transform,
         }
     }
 }
@@ -704,25 +707,25 @@ impl Edge {
 #[derive(Debug)]
 struct EdgeSegmentIter<'a, S> {
     line: Option<&'a Edge>,
-    style: &'a S,
+    transform: &'a S,
 }
 
 impl<'a, S> Clone for EdgeSegmentIter<'a, S> {
     fn clone(&self) -> Self {
         EdgeSegmentIter {
             line: self.line,
-            style: self.style
+            transform: self.transform
         }
     }
 }
 
-impl<'a, S: Style> Iterator for EdgeSegmentIter<'a, S> {
+impl<'a, S: Transform> Iterator for EdgeSegmentIter<'a, S> {
     type Item = Segment;
 
     fn next(&mut self) -> Option<Self::Item> {
         let line = self.line.take()?;
-        let start = line.start.resolve(self.style).0;
-        let end = line.end.resolve(self.style).0;
+        let start = line.start.resolve(self.transform).0;
+        let end = line.end.resolve(self.transform).0;
         Some(Segment::line(start, end, None))
     }
 }
@@ -795,6 +798,11 @@ impl Position {
         Position::new(path, location, sideways, shift, rotation)
     }
 
+    pub fn shift(mut self, shift: (Distance, Distance)) -> Self {
+        self.shift_assign(shift);
+        self
+    }
+
     pub fn shift_assign(&mut self, shift: (Distance, Distance)) {
         if let Some(curr) = self.shift.as_mut() {
             curr.0 += shift.0;
@@ -816,30 +824,34 @@ impl Position {
         res
     }
 
-    pub fn storage_bounds(&self) -> Rect {
+    pub fn _storage_bounds(&self) -> Rect {
         let p = self.path.segment_after(
             self.location.world
         ).p0();
         (p, p).into()
     }
 
+    pub fn storage_bounds(&self) -> world::Rect {
+        self._storage_bounds().into()
+    }
+
     pub fn resolve(
-        &self, style: &impl Style
+        &self, transform: &impl Transform
     ) -> (Point, f64) {
-        let loc = self.path.location_time(&self.location, style);
+        let loc = self.path.location_time(&self.location, transform);
         let seg = self.path.segment(loc.seg).unwrap();
         let storage_point = seg.point(loc.time);
         let dir = seg.dir(loc.time);
         let shift = self.shift.as_ref().map(|shift| {
             Vec2::new(
-                shift.0.resolve(storage_point, style),
-                shift.1.resolve(storage_point, style)
+                shift.0.resolve(storage_point, transform),
+                shift.1.resolve(storage_point, transform)
             )
         });
-        let mut point = style.transform().transform() * storage_point;
+        let mut point = transform.transform() * storage_point;
         let angle = dir.atan2() + self.rotation.unwrap_or(0.);
         if let Some(sideways) = self.sideways.as_ref() {
-            let sideways= sideways.resolve(storage_point, style);
+            let sideways= sideways.resolve(storage_point, transform);
             let dir = sideways * rot90(dir).normalize();
             point += dir;
         }
@@ -850,10 +862,10 @@ impl Position {
     }
 
     pub fn resolve_label(
-        &self, style: &impl Style, on_path: bool
+        &self, transform: &impl Transform, on_path: bool
     ) -> (Point, f64) {
         if on_path {
-            let (point, mut angle) = self.resolve(style);
+            let (point, mut angle) = self.resolve(transform);
 
             // Correct the angle so the label won’t be upside down.
             if angle.abs() > 0.5 * PI {
@@ -867,7 +879,7 @@ impl Position {
             (point, angle)
         }
         else {
-            (self.resolve(style).0, self.rotation.unwrap_or(0.))
+            (self.resolve(transform).0, self.rotation.unwrap_or(0.))
         }
     }
 }
@@ -1150,19 +1162,20 @@ impl Segment {
         }
     }
 
-    /// Transforms the segment for use with a style.
-    pub fn transform(self, style: &impl Style) -> Self {
+    /// Transforms the segment for use with a transform.
+    pub fn transform(self, transform: &impl Transform) -> Self {
+        let transform = transform.transform();
         Segment {
-            start: style.transform().transform() * self.start,
+            start: transform * self.start,
             control: self.control.map(|(c0, c1)| {
                 (
-                    style.transform().transform() * c0,
-                    style.transform().transform() * c1
+                    transform * c0,
+                    transform * c1
                 )
             }),
-            end: style.transform().transform() * self.end,
+            end: transform * self.end,
             arclen: self.arclen.map(|arclen| {
-                style.transform().transform().as_tuple().1 * arclen
+                transform.as_tuple().1 * arclen
             }),
             off_factor: self.off_factor,
         }
@@ -1170,12 +1183,12 @@ impl Segment {
 
     /// Scales the segment and then offsets it if necessary.
     pub fn transf_off(
-        self, style: &impl Style, offset: Option<&Distance>
+        self, transform: &impl Transform, offset: Option<&Distance>
     ) -> Self {
-        let res = self.transform(style);
+        let res = self.transform(transform);
         match offset {
             Some(offset) => {
-                res.offset(offset.resolve(self.p0(), style))
+                res.offset(offset.resolve(self.p0(), transform))
             }
             None => res
         }

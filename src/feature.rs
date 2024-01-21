@@ -48,7 +48,7 @@ pub trait Feature {
     /// Returns the bounding box of the feature when stored.
     fn storage_bounds(&self) -> world::Rect;
 
-    /// Shapes the feature using the given style.
+    /// Shapes the feature using the given style and canvas.
     fn shape(
         &self, style: &Self::Style, canvas: &Canvas
     ) -> Option<Self::Shape<'_>>;
@@ -187,74 +187,6 @@ impl<F> FeatureSet<F> {
 }
 
 
-//------------ FeatureSetBuilder ---------------------------------------------
-
-/// Builds a new feature set.
-///
-/// You can aquire a new, empty builder via [`new`](Self::new), the `Default`
-/// implementation, or [`FeatureSet::builder`]. You can then add features
-/// using the [`insert`][Self::insert] method and finally convert the builder
-/// into an imutable feature set via [`finialize`][Self::finalize].
-pub struct FeatureSetBuilder<F> {
-    /// The features to be added to the feature set.
-    features: Vec<StoredFeature<F>>,
-
-    /// The bounding box of the feature set.
-    ///
-    /// This will be `None` if `features´ is empty.
-    bounds: Option<AABB<[f64; 3]>>,
-}
-
-impl<F> Default for FeatureSetBuilder<F> {
-    fn default() -> Self {
-        Self {
-            features: Default::default(),
-            bounds: None,
-        }
-    }
-}
-
-impl<F> FeatureSetBuilder<F> {
-    /// Creates a new empty feature set builder.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Inserts a feature into the set.
-    ///
-    /// The feature itself is given by `feature`.
-    /// 
-    /// The `scale` argument provides the minimum and maximum scale for which
-    /// the feature should be visible. These values are simply used as given.
-    /// They don’t need to be the actual scale but could also be zoom levels
-    /// or some other abstract numerical value that represents how detailed
-    /// the map needs to be.
-    pub fn insert(
-        &mut self, feature: F, scale: (f64, f64), layer: i16, group: i16,
-    )
-    where F: Feature {
-        let feature = StoredFeature::new(feature, scale, layer, group);
-        if let Some(bounds) = self.bounds.as_mut() {
-            bounds.merge(&feature.bounds)
-        }
-        else {
-            self.bounds = Some(feature.bounds)
-        };
-        self.features.push(feature);
-    }
-
-    /// Converts the builder into the final, imutable feature set.
-    pub fn finalize(self) -> FeatureSet<F> {
-        FeatureSet {
-            features: RTree::bulk_load(self.features),
-            bounds: self.bounds.unwrap_or_else(|| {
-                AABB::from_point([0., 0., 0.])
-            })
-        }
-    }
-}
-
-
 //------------ Shaped --------------------------------------------------------
 
 /// A single feature that has been shaped for rendering.
@@ -344,6 +276,76 @@ impl<'a, S> Iterator for ShapeGroupIter<'a, S> {
             let (head, tail) = self.slice.split_at(len);
             self.slice = tail;
             Some(head)
+        }
+    }
+}
+
+
+//------------ FeatureSetBuilder ---------------------------------------------
+
+/// Builds a new feature set.
+///
+/// You can aquire a new, empty builder via [`new`](Self::new), the `Default`
+/// implementation, or [`FeatureSet::builder`]. You can then add features
+/// using the [`insert`][Self::insert] method and finally convert the builder
+/// into an imutable feature set via [`finialize`][Self::finalize].
+pub struct FeatureSetBuilder<F> {
+    /// The features to be added to the feature set.
+    features: Vec<StoredFeature<F>>,
+
+    /// The bounding box of the feature set.
+    ///
+    /// This will be `None` if `features´ is empty.
+    bounds: Option<AABB<[f64; 3]>>,
+}
+
+impl<F> Default for FeatureSetBuilder<F> {
+    fn default() -> Self {
+        Self {
+            features: Default::default(),
+            bounds: None,
+        }
+    }
+}
+
+impl<F> FeatureSetBuilder<F> {
+    /// Creates a new empty feature set builder.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Inserts a feature into the set.
+    ///
+    /// The feature itself is given by `feature`.
+    /// 
+    /// The `scale` argument provides the minimum and maximum scale for which
+    /// the feature should be visible. These values are simply used as given.
+    /// They don’t need to be the actual scale but could also be zoom levels
+    /// or some other abstract numerical value that represents how detailed
+    /// the map needs to be.
+    pub fn insert(
+        &mut self,
+        feature: impl Into<F>,
+        scale: (f64, f64), layer: i16, group: i16,
+    )
+    where F: Feature {
+        let feature = StoredFeature::new(feature.into(), scale, layer, group);
+        if let Some(bounds) = self.bounds.as_mut() {
+            bounds.merge(&feature.bounds)
+        }
+        else {
+            self.bounds = Some(feature.bounds)
+        };
+        self.features.push(feature);
+    }
+
+    /// Converts the builder into the final, imutable feature set.
+    pub fn finalize(self) -> FeatureSet<F> {
+        FeatureSet {
+            features: RTree::bulk_load(self.features),
+            bounds: self.bounds.unwrap_or_else(|| {
+                AABB::from_point([0., 0., 0.])
+            })
         }
     }
 }

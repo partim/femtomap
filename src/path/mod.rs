@@ -2,10 +2,10 @@
 
 pub use self::path::{
     Distance, Location, MapDistance, MapDistanceVec, Path, PathBuilder,
-    SegTime, Style, Transform,
+    SegTime, Transform,
 };
 pub use self::trace::{
-    Edge, Position, Segment, SegmentIter, Subpath,Trace
+    Edge, Position, Segment, SegmentIter, Subpath, Trace
 };
 
 mod path;

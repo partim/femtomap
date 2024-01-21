@@ -317,12 +317,12 @@ impl Assignment {
 /// An argument list is a non-empty comma separated list of arguments.
 ///
 /// ```text
-/// argument-list ::= argument  *("," argument)
+/// argument-list ::= expression  *("," expression)
 /// ```
 #[derive(Clone, Debug)]
 pub struct ArgumentList {
     /// The list of arguments.
-    pub arguments: Vec<Argument>,
+    pub arguments: Vec<Expression>,
 
     /// The start of the argument list in the source
     pub pos: Pos,
@@ -333,32 +333,9 @@ impl ArgumentList {
         let pos = Pos::capture(&input);
         let (input, arguments) = separated_list0(
             opt_ws(tag_char(',')),
-            opt_ws(Argument::parse)
+            opt_ws(Expression::parse)
         )(input)?;
         Ok((input, ArgumentList { arguments, pos }))
-    }
-}
-
-
-//------------ Argument ------------------------------------------------------
-
-/// An argument is either a positional or keyword argument.
-///
-/// ```text
-/// argument ::= assignment | expression
-/// ```
-#[derive(Clone, Debug)]
-pub enum Argument {
-    Keyword(Assignment),
-    Pos(Expression),
-}
-
-impl Argument {
-    fn parse(input: Span) -> IResult<Span, Self> {
-        alt((
-            map(Assignment::parse, Argument::Keyword),
-            map(Expression::parse, Argument::Pos),
-        ))(input)
     }
 }
 
