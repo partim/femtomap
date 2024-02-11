@@ -63,6 +63,11 @@ impl Outline {
         self.outline.push(seg)
     }
 
+    /// Returns whether the outline contains only finite segments.
+    pub fn is_finite(&self) -> bool {
+        self.outline.iter().all(|seg| seg.is_finite())
+    }
+
     /// Returns the number of nodes in the path.
     pub fn node_len(&self) -> u32 {
         match self.outline.len() {
@@ -260,6 +265,7 @@ impl<'a> Positions<'a> {
         loop {
             let seg_len = seg.arclen();
             let seg_distance = distance * seg.off_factor();
+
             match seg_distance.partial_cmp(&seg_len).unwrap() {
                 cmp::Ordering::Less => {
                     let end = seg.arctime(seg_distance);
@@ -279,7 +285,10 @@ impl<'a> Positions<'a> {
                 cmp::Ordering::Greater => {
                     distance -= seg_len / seg.off_factor();
                     match self.iter.next() {
-                        Some(next_seg) => seg = *next_seg,
+                        Some(next_seg) => {
+                            assert!(seg.arclen().is_finite());
+                            seg = *next_seg;
+                        }
                         None => {
                             self.cur_seg = None;
                             return None

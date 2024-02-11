@@ -272,7 +272,7 @@ impl Path {
             location.world,
             location.map.iter().map(
                 |canv| transform.distance(*canv)
-            ).sum::<f64>() * transform.canvas_bp(),
+            ).sum::<f64>(),
             transform
         )
     }
@@ -535,7 +535,7 @@ impl Distance {
         }).unwrap_or(0.);
 
         for item in &self.map {
-            res += item.resolve(transform) * transform.canvas_bp()
+            res += item.resolve(transform)
         }
 
         res

@@ -916,28 +916,26 @@ pub struct Segment {
 }
 
 impl Segment {
+    /// Creates a new segment.
+    fn new(
+        start: Point, control: Option<(Point, Point)>, end: Point,
+        arclen: Option<f64>
+    ) -> Self {
+        let res = Segment { start, control, end, arclen, off_factor: 1. };
+        assert!(res.is_finite());
+        res
+    }
+
     /// Creates a new straight segment.
     pub fn line(start: Point, end: Point, arclen: Option<f64>) -> Self {
-        Segment {
-            start,
-            control: None,
-            end,
-            arclen,
-            off_factor: 1.,
-        }
+        Segment::new(start, None, end, arclen)
     }
 
     /// Creates a new cubic bezier segment.
     pub fn curve(
         start: Point, c0: Point, c1: Point, end: Point, arclen: Option<f64>
     ) -> Self {
-        Segment {
-            start,
-            control: Some((c0, c1)),
-            end,
-            arclen,
-            off_factor: 1.,
-        }
+        Segment::new(start,Some((c0, c1)), end, arclen)
     }
 
     /// Creates a new segment connecting two other segments.
@@ -990,6 +988,22 @@ impl Segment {
             Some((c0, c1)) => Ok(CubicBez::new(self.start, c0, c1, self.end)),
             None => Err(Line::new(self.start, self.end))
         }
+    }
+
+    /// Returns whether the segment is normal.
+    ///
+    /// It is normal if all coordinates of all points are finite, i.e.,
+    /// neither NaN nor infinite.
+    pub fn is_finite(self) -> bool {
+        if !self.start.is_finite() || !self.end.is_finite() {
+            return false;
+        }
+        if let Some((c0, c1)) = self.control {
+            if !c0.is_finite() || !c1.is_finite() {
+                return false;
+            }
+        }
+        true
     }
 
     /// Returns the start point of the segment.
