@@ -3,10 +3,20 @@
 use std::{cmp, ops};
 use std::f64::consts::PI;
 use std::sync::Arc;
-use kurbo::{CubicBez, Line, ParamCurveArclen, Point, TranslateScale, Vec2};
+use kurbo::{CubicBez, Line, ParamCurveArclen, Point, TranslateScale};
 use smallvec::SmallVec;
 use super::trace::{STORAGE_ACCURACY, Segment};
 
+//------------ Transform -----------------------------------------------------
+
+pub trait Transform {
+    fn distance(&self, distance: MapDistance) -> f64;
+    fn transform(&self) -> TranslateScale;
+    fn equator_scale(&self) -> f64;
+    fn canvas_bp(&self) -> f64;
+}
+
+/*
 //----------- TEMPORARY ------------------------------------------------------
 
 pub trait Style {
@@ -78,6 +88,7 @@ impl Transform {
         self.canvas_bp
     }
 }
+*/
 
 
 //----------- Constants ------------------------------------------------------
@@ -255,19 +266,19 @@ impl Path {
 
     /// Returns the time value for a location in a given style.
     pub fn location_time(
-        &self, location: &Location, style: &impl Style,
+        &self, location: &Location, transform: &impl Transform
     ) -> SegTime {
         self._location_time(
             location.world,
             location.map.iter().map(
-                |canv| style.resolve_distance(*canv)
-            ).sum::<f64>() * style.transform().canvas_bp(),
-            style
+                |canv| transform.distance(*canv)
+            ).sum::<f64>(),
+            transform
         )
     }
 
     fn _location_time(
-        &self, world: SegTime, map: f64, style: &impl Style,
+        &self, world: SegTime, map: f64, transform: &impl Transform
     ) -> SegTime {
         if map == 0. {
             world
@@ -276,7 +287,7 @@ impl Path {
             let offset = -map;
             let seg = self.segment(
                 world.seg
-            ).unwrap().transform(style);
+            ).unwrap().transform(transform);
             let before = seg.sub(0., world.time);
             let arclen = before.arclen();
             if arclen >= offset {
@@ -290,7 +301,7 @@ impl Path {
                 self._location_time(
                     SegTime::new(world.seg - 1, 1.),
                     -(offset - arclen),
-                    style
+                    transform
                 )
             }
             else {
@@ -301,7 +312,7 @@ impl Path {
             let offset = map;
             let seg = self.segment(
                 world.seg
-            ).unwrap().transform(style);
+            ).unwrap().transform(transform);
             let after = seg.sub(world.time, 1.);
             let arclen = after.arclen();
             if arclen > offset {
@@ -317,7 +328,7 @@ impl Path {
                 self._location_time(
                     SegTime::new(world.seg + 1, 0.),
                     offset - arclen,
-                    style
+                    transform
                 )
             }
         }
@@ -448,8 +459,8 @@ impl MapDistance {
         MapDistance { value, unit }
     }
 
-    pub fn resolve(self, style: &impl Style) -> f64 {
-        style.resolve_distance(self)
+    pub fn resolve(self, transform: &impl Transform) -> f64 {
+        transform.distance(self)
     }
 
     pub fn value(self) -> f64 {
@@ -499,6 +510,16 @@ impl Distance {
         Distance { world, map }
     }
 
+    /// Creates a new distance from a world component only.
+    pub fn world(value: f64) -> Self {
+        Self::new(Some(value), Default::default())
+    }
+
+    /// Creates a new distance from a single map component.
+    pub fn map(value: f64, unit: usize) -> Self {
+        Self::new(None, smallvec::smallvec![MapDistance::new(value, unit)])
+    }
+
     /// Returns whether both dimensions of the distance are `None`.
     pub fn is_none(&self) -> bool {
         self.world.is_none() && self.map.is_empty()
@@ -506,15 +527,15 @@ impl Distance {
 
     /// Resolves the distance at the given point in storage coordinates.
     pub fn resolve(
-        &self, point: Point, style: &impl Style,
+        &self, point: Point, transform: &impl Transform,
     ) -> f64 {
         let mut res = self.world.map(|world| {
             to_storage_distance(world, point)
-                * style.transform().equator_scale()
+                * transform.equator_scale()
         }).unwrap_or(0.);
 
         for item in &self.map {
-            res += item.resolve(style) * style.transform().canvas_bp()
+            res += item.resolve(transform)
         }
 
         res
