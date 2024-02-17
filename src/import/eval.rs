@@ -272,6 +272,8 @@ impl<'a, B: Builtin> Clone for Expression<'a, B> {
 
 /// A type that can be taken from an expression.
 pub trait FromExpression<'a, B: Builtin>: Sized {
+    fn matches(expr: &Expression<'a, B>) -> bool;
+
     fn from_expression(
         expr: Expression<'a, B>, err:  &mut EvalErrors
     ) -> Result<Self, Failed>;
@@ -282,6 +284,10 @@ where
     B: Builtin,
     T: FromExpression<'a, B>
 {
+    fn matches(expr: &Expression<'a, B>) -> bool {
+        T::matches(expr)
+    }
+
     fn from_expression(
         expr: Expression<'a, B>, err:  &mut EvalErrors
     ) -> Result<Self, Failed> {
@@ -291,6 +297,10 @@ where
 }
 
 impl<'a, B: Builtin> FromExpression<'a, B> for Color {
+    fn matches(expr: &Expression<'a, B>) -> bool {
+        matches!(expr.value, Value::Color(_))
+    }
+
     fn from_expression(
         expr: Expression<'a, B>, err:  &mut EvalErrors
     ) -> Result<Self, Failed> {
@@ -305,6 +315,10 @@ impl<'a, B: Builtin> FromExpression<'a, B> for Color {
 }
 
 impl<'a, B: Builtin> FromExpression<'a, B> for Distance {
+    fn matches(expr: &Expression<'a, B>) -> bool {
+        matches!(expr.value, Value::Distance(_))
+    }
+
     fn from_expression(
         expr: Expression<'a, B>, err:  &mut EvalErrors
     ) -> Result<Self, Failed> {
@@ -319,6 +333,10 @@ impl<'a, B: Builtin> FromExpression<'a, B> for Distance {
 }
 
 impl<'a, B: Builtin> FromExpression<'a, B> for Number {
+    fn matches(expr: &Expression<'a, B>) -> bool {
+        matches!(expr.value, Value::Number(_))
+    }
+
     fn from_expression(
         expr: Expression<'a, B>, err:  &mut EvalErrors
     ) -> Result<Self, Failed> {
@@ -333,6 +351,10 @@ impl<'a, B: Builtin> FromExpression<'a, B> for Number {
 }
 
 impl<'a, B: Builtin> FromExpression<'a, B> for f64 {
+    fn matches(expr: &Expression<'a, B>) -> bool {
+        matches!(expr.value, Value::Number(_))
+    }
+
     fn from_expression(
         expr: Expression<'a, B>, err:  &mut EvalErrors
     ) -> Result<Self, Failed> {
@@ -347,6 +369,10 @@ impl<'a, B: Builtin> FromExpression<'a, B> for f64 {
 }
 
 impl<'a, B: Builtin> FromExpression<'a, B> for u8 {
+    fn matches(expr: &Expression<'a, B>) -> bool {
+        matches!(expr.value, Value::Number(_))
+    }
+
     fn from_expression(
         expr: Expression<'a, B>, errs:  &mut EvalErrors
     ) -> Result<Self, Failed> {
@@ -369,6 +395,10 @@ impl<'a, B: Builtin> FromExpression<'a, B> for u8 {
 }
 
 impl<'a, B: Builtin> FromExpression<'a, B> for i16 {
+    fn matches(expr: &Expression<'a, B>) -> bool {
+        matches!(expr.value, Value::Number(_))
+    }
+
     fn from_expression(
         expr: Expression<'a, B>, errs:  &mut EvalErrors
     ) -> Result<Self, Failed> {
@@ -391,6 +421,10 @@ impl<'a, B: Builtin> FromExpression<'a, B> for i16 {
 }
 
 impl<'a, B: Builtin> FromExpression<'a, B> for Position {
+    fn matches(expr: &Expression<'a, B>) -> bool {
+        matches!(expr.value, Value::Position(_))
+    }
+
     fn from_expression(
         expr: Expression<'a, B>, err:  &mut EvalErrors
     ) -> Result<Self, Failed> {
@@ -405,6 +439,10 @@ impl<'a, B: Builtin> FromExpression<'a, B> for Position {
 }
 
 impl<'a, B: Builtin> FromExpression<'a, B> for SymbolSet {
+    fn matches(expr: &Expression<'a, B>) -> bool {
+        matches!(expr.value, Value::SymbolSet(_))
+    }
+
     fn from_expression(
         expr: Expression<'a, B>, err:  &mut EvalErrors
     ) -> Result<Self, Failed> {
@@ -419,6 +457,10 @@ impl<'a, B: Builtin> FromExpression<'a, B> for SymbolSet {
 }
 
 impl<'a, B: Builtin> FromExpression<'a, B> for String {
+    fn matches(expr: &Expression<'a, B>) -> bool {
+        matches!(expr.value, Value::Text(_))
+    }
+
     fn from_expression(
         expr: Expression<'a, B>, err:  &mut EvalErrors
     ) -> Result<Self, Failed> {
@@ -433,6 +475,10 @@ impl<'a, B: Builtin> FromExpression<'a, B> for String {
 }
 
 impl<'a, B: Builtin> FromExpression<'a, B> for Trace {
+    fn matches(expr: &Expression<'a, B>) -> bool {
+        matches!(expr.value, Value::Trace(_))
+    }
+
     fn from_expression(
         expr: Expression<'a, B>, err:  &mut EvalErrors
     ) -> Result<Self, Failed> {
@@ -447,6 +493,10 @@ impl<'a, B: Builtin> FromExpression<'a, B> for Trace {
 }
 
 impl<'a, B: Builtin> FromExpression<'a, B> for (Distance, Distance) {
+    fn matches(expr: &Expression<'a, B>) -> bool {
+        matches!(expr.value, Value::Vector(_))
+    }
+
     fn from_expression(
         expr: Expression<'a, B>, err:  &mut EvalErrors
     ) -> Result<Self, Failed> {
@@ -461,6 +511,10 @@ impl<'a, B: Builtin> FromExpression<'a, B> for (Distance, Distance) {
 }
 
 impl<'a, B: Builtin> FromExpression<'a, B> for &'a ImportPath{
+    fn matches(expr: &Expression<'a, B>) -> bool {
+        matches!(expr.value, Value::ImportPath(_))
+    }
+
     fn from_expression(
         expr: Expression<'a, B>, err:  &mut EvalErrors
     ) -> Result<Self, Failed> {
@@ -1396,7 +1450,7 @@ impl<'a, B: Builtin> ArgumentList<'a, B> {
     ) -> Result<[Expression<'a, B>; N], Failed> {
         self.try_into_array().map_err(|this| {
             err.add(this.pos,
-                concat!("expected ", stringify!(N), " arguments")
+                format!("expected {} arguments", N)
             );
             Failed
         })
@@ -1433,6 +1487,21 @@ impl<'a, B: Builtin> ArgumentList<'a, B> {
             Err(_) => unreachable!()
         };
         Ok((head, tail))
+    }
+
+    pub fn take_first_if_matches<T: FromExpression<'a, B>>(
+        &mut self, err: &mut EvalErrors
+    ) -> Result<Option<T>, Failed> {
+        match self.arguments.first() {
+            Some(arg) => {
+                if !T::matches(arg) {
+                    return Ok(None)
+                }
+            }
+            None => return Ok(None)
+        }
+        let arg = self.arguments.remove(0);
+        arg.eval(err).map(Some)
     }
 }
 
