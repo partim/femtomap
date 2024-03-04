@@ -4,7 +4,7 @@
 //! rendered onto a map in a way that is independent of the projection, scale,
 //! or style of the map.
 //!
-//! An application defines its own feature type an implements the [`Feature`]
+//! An application defines its own feature type and implements the [`Feature`]
 //! trait for it. It can use the [`FeatureSet`] collection to store features
 //! or create them on the fly – for instance from a database.
 //!
@@ -18,7 +18,8 @@
 //!
 //! An application’s feature type is either an enum of all the primitive
 //! features in use or a trait object. However, because [`Feature`] is not
-//! object safe, you will have to declare your own trait for `dyn Trait`.
+//! object safe, you will have to declare your own trait for `dyn Trait` and
+//! a wrapper type that implementes [`Feature`].
 
 use std::slice;
 use std::cmp::Ordering;

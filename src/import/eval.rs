@@ -37,6 +37,12 @@ pub trait Builtin: Sized {
     /// This type is held by the [`Value::Builtin(_)`] variant.
     type Value: Clone;
 
+    /// Creates a new scope based on the parent scope.
+    fn new_scope(
+        &self,
+        parent: &Scope<Self>,
+    ) -> Self::Scope;
+
     /// Evaluates a distance.
     fn eval_distance(
         &self,
@@ -193,7 +199,7 @@ impl<'a, B: Builtin> Scope<'a, B> {
             builtin: parent.builtin,
             parent: Some(parent),
             variables: Default::default(),
-            custom: Default::default(),
+            custom: parent.builtin.new_scope(parent),
         }
     }
 
