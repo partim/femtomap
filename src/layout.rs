@@ -1,5 +1,6 @@
 //! Complex text arrangements.
 
+use std::fmt;
 use kurbo::{PathEl, Point, Rect, Vec2};
 use crate::render::{Canvas, Font, OutlineIter, Sketch, Text};
 
@@ -7,11 +8,11 @@ use crate::render::{Canvas, Font, OutlineIter, Sketch, Text};
 //------------ Block ---------------------------------------------------------
 
 /// A block is something that contains a layout.
-pub struct Block<P> {
+pub struct Block<P: Properties> {
     content: Layout<P>,
 }
 
-impl<P> Block<P> {
+impl<P: Properties> Block<P> {
     pub fn new(content: Layout<P>) -> Self {
         Block {
             content
@@ -45,20 +46,20 @@ impl<P> Block<P> {
 /// layouts: multiple layouts are placed in such a way that their extents
 /// touch.
 #[derive(Clone, Debug)]
-pub struct Layout<P> {
+pub struct Layout<P: Properties> {
     /// The content of the layout.
     content: Content<P>,
 }
 
 #[derive(Clone, Debug)]
-enum Content<P> {
+enum Content<P: Properties> {
     Vbox(Vbox<P>),
     Hbox(Hbox<P>),
     Span(Span<P>),
     Rule(Rule<P>),
 }
 
-impl<P> Layout<P> {
+impl<P: Properties> Layout<P> {
     fn new(content: Content<P>) -> Self {
         Layout { content }
     }
@@ -75,7 +76,7 @@ impl<P> Layout<P> {
         Self::new(Content::Hbox(Hbox::new(hbase, valign, properties, rows)))
     }
 
-    pub fn span(text: String, properties: P) -> Self {
+    pub fn span(text: P::SpanText, properties: P) -> Self {
         Self::new(Content::Span(Span::new(text, properties)))
     }
 
@@ -135,7 +136,7 @@ impl<P: Properties> Layout<P> {
 
 /// A box with its content stacked vertically.
 #[derive(Clone, Debug)]
-struct Vbox<P> {
+struct Vbox<P: Properties> {
     /// The horizontal alignment of the content.
     ///
     /// This also determines the horizontal base of the box.
@@ -151,7 +152,7 @@ struct Vbox<P> {
     lines: Vec<Layout<P>>,
 }
 
-impl<P> Vbox<P> {
+impl<P: Properties> Vbox<P> {
     fn new(
         halign: Align, vbase: Align, properties: P, lines: Vec<Layout<P>>
     ) -> Self {
@@ -260,14 +261,14 @@ impl<P> Vbox<P> {
 
 /// A sequence of layouts stacked horizontally.
 #[derive(Clone, Debug)]
-struct Hbox<P> {
+struct Hbox<P: Properties> {
     hbase: Align,
     valign: Align,
     properties: P,
     columns: Vec<Layout<P>>,
 }
 
-impl<P> Hbox<P> {
+impl<P: Properties> Hbox<P> {
     fn new(
         hbase: Align, valign: Align, properties: P, columns: Vec<Layout<P>>
     ) -> Self {
@@ -406,13 +407,13 @@ impl<P> Hbox<P> {
 
 /// A run of text rendered with the same properties.
 #[derive(Clone, Debug)]
-pub struct Span<P> {
-    text: String,
+pub struct Span<P: Properties> {
+    text: P::SpanText,
     properties: P,
 }
 
-impl<P> Span<P> {
-    fn new(text: String, properties: P) -> Self {
+impl<P: Properties> Span<P> {
+    fn new(text: P::SpanText, properties: P) -> Self {
         Self { text, properties }
     }
 
@@ -427,7 +428,8 @@ impl<P> Span<P> {
     ) -> ShapedLayout<P>
     where P: Properties {
         let text = canvas.prepare_text(
-            &self.text, self.properties.font(style)
+            self.properties.span_text(&self.text, style),
+            self.properties.font(style),
         );
         let metrics = canvas.text_metrics(&text);
 
@@ -542,6 +544,12 @@ pub trait Properties: Sized {
     /// of the layout is currently performed.
     type Stage;
 
+    /// The type for the text held by a span.
+    //
+    //  This is required to be Clone and Debug so we can derive those all
+    //  over the place here. XXX Might want to do this properly later.
+    type SpanText: Clone + fmt::Debug;
+
     /// Returns whether a span is packed.
     ///
     /// For a packed span, only the inked area is considered when
@@ -552,6 +560,11 @@ pub trait Properties: Sized {
         let _ = style;
         false
     }
+
+    /// Returns the span text for a span with this style.
+    fn span_text<'a>(
+        &self, text: &'a Self::SpanText, style: &Self::Style
+    ) -> &'a str;
 
     /// Returns the font to be used for a span with these properties.
     fn font (&self, style: &Self::Style) -> Font;
