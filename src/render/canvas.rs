@@ -301,6 +301,11 @@ impl SketchProperty for kurbo::Circle {
     }
 }
 
+impl SketchProperty for kurbo::CircleSegment {
+    fn apply_to_sketch(self, group: &mut Sketch) {
+        OutlineIter(self.path_elements(0.1)).apply_to_sketch(group);
+    }
+}
 
 
 //------------ DashPattern ---------------------------------------------------
