@@ -26,7 +26,7 @@ impl Canvas {
     /// Creates a new canvas.
     pub fn new(surface: &cairo::Surface) -> Self {
         let cairo = cairo::Context::new(surface).expect("cairo_create failed");
-        let pango = pangocairo::create_context(&cairo);
+        let pango = pangocairo::functions::create_context(&cairo);
 
         Canvas { cairo, pango }
     }

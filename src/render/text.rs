@@ -42,12 +42,12 @@ impl<'a> Text<'a> {
 
     pub(super) fn fill(&self, cairo: &cairo::Context, at: Point) {
         self.start_path(cairo, at);
-        pangocairo::show_layout(cairo, &self.layout);
+        pangocairo::functions::show_layout(cairo, &self.layout);
     }
 
     pub(super) fn stroke(&self, cairo: &cairo::Context, at: Point) {
         self.start_path(cairo, at);
-        pangocairo::layout_path(cairo, &self.layout);
+        pangocairo::functions::layout_path(cairo, &self.layout);
         cairo.stroke().expect("cairo_stroke failed");
     }
 

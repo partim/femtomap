@@ -5,15 +5,15 @@ authors = ["Martin Hoffmann <hn@nvnc.de>"]
 edition = "2021"
 
 [dependencies]
-cairo-rs = { version = "0.17", features = ["png", "svg", "v1_16"] }
+cairo-rs = { version = "0.19", features = ["png", "svg", "v1_16"] }
 ignore = "0.4.14"
-kurbo    = "0.9.0"
+kurbo    = "0.11.0"
 nom = "7"
 nom_locate = "4"
 osmxml = { git = "https://github.com/partim/osmxml.git" }
-pango = { version = "0.17", features = ["v1_50"] }
-pangocairo = { version = "0.17" }
-rstar    = "0.10"
+pango = { version = "0.19", features = ["v1_50"] }
+pangocairo = { version = "0.19" }
+rstar    = "0.12"
 smallvec = { version = "1.8", features = [ "const_generics" ] }
 
 serde    = { version = "1", features = ["derive"], optional = true }

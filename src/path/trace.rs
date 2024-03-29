@@ -1189,7 +1189,7 @@ impl Segment {
             }),
             end: transform * self.end,
             arclen: self.arclen.map(|arclen| {
-                transform.as_tuple().1 * arclen
+                transform.scale * arclen
             }),
             off_factor: self.off_factor,
         }
