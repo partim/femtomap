@@ -6,7 +6,7 @@ pub use self::outline::{Outline, OutlineIter};
 pub use self::pattern::{Color, InvalidHexColor, Pattern};
 pub use self::text::{
     Font, FontBuilder, FontFamily, FontFeatures, FontStretch, FontStyle,
-    FontWeight, Text,
+    FontWeight, Text, TextDecoration,
 };
 
 pub(crate) mod canvas;

@@ -128,6 +128,7 @@ pub struct FontBuilder {
     variant: Option<FontVariant>,
     weight: Option<FontWeight>,
     line_height: Option<f64>,
+    decoration: Option<TextDecoration>,
 }
 
 impl FontBuilder {
@@ -175,6 +176,11 @@ impl FontBuilder {
         self
     }
 
+    pub fn decoration(mut self, deco: TextDecoration) -> Self {
+        self.decoration = Some(deco);
+        self
+    }
+
     /// Takes unset fields from a different value.
     pub fn update(&mut self, other: &Self) {
         if self.family.is_none() {
@@ -200,6 +206,9 @@ impl FontBuilder {
         }
         if self.line_height.is_none() {
             self.line_height = other.line_height;
+        }
+        if self.decoration.is_none() {
+            self.decoration = other.decoration;
         }
     }
 
@@ -235,6 +244,9 @@ impl FontBuilder {
             attrs.insert(
                 pango::AttrFloat::new_line_height(line_height)
             );
+        }
+        if let Some(decoration) = self.decoration {
+            decoration.apply_attrs(&attrs);
         }
         Font { attrs }
     }
@@ -398,6 +410,43 @@ impl From<FontWeight> for pango::Weight {
             FontWeight::Ultrabold => pango::Weight::Ultrabold,
             FontWeight::Heavy => pango::Weight::Heavy,
             FontWeight::Ultraheavy => pango::Weight::Ultraheavy,
+        }
+    }
+}
+
+
+//------------ TextDecoration ------------------------------------------------
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum TextDecoration {
+    #[default]
+    None,
+    Underline,
+    Overline,
+    LineThrough,
+}
+
+impl TextDecoration {
+    fn apply_attrs(self, attrs: &pango::AttrList) {
+        match self {
+            Self::None => { }
+            Self::Underline => {
+                attrs.insert(
+                    pango::AttrInt::new_underline(
+                        pango::Underline::Single
+                    )
+                );
+            }
+            Self::Overline => {
+                attrs.insert(
+                    pango::AttrInt::new_overline(
+                        pango::Overline::Single
+                    )
+                );
+            }
+            Self::LineThrough => {
+                attrs.insert(pango::AttrInt::new_strikethrough(true));
+            }
         }
     }
 }
