@@ -12,6 +12,7 @@ use osmxml::elements::{MemberType, Osm, Relation, Way};
 use osmxml::read::read_xml;
 use crate::path::Path;
 use crate::mp_path;
+use super::watch::WatchSet;
 
 
 //------------ ImportPathSet -------------------------------------------------
@@ -22,7 +23,9 @@ pub struct ImportPathSet {
 }
 
 impl ImportPathSet {
-    pub fn load(path: &FsPath) -> Result<Self, PathSetError> {
+    pub fn load(
+        path: &FsPath, watch: &mut WatchSet
+    ) -> Result<Self, PathSetError> {
         let mut types = TypesBuilder::new();
         types.add("osm", "*.osm").unwrap();
         let walk = WalkBuilder::new(path)
@@ -30,12 +33,14 @@ impl ImportPathSet {
             .build_parallel();
         let res = Mutex::new(Self::default());
         let errors = Mutex::new(PathSetError::new());
+        let watch = Mutex::new(watch);
         walk.run(|| {
             Box::new(|path| {
                 let path = match path {
                     Ok(path) => path,
                     Err(_) => return WalkState::Continue
                 };
+                watch.lock().unwrap().add(path.path().into());
                 if let Some(file_type) = path.file_type() {
                     if file_type.is_dir() {
                         return WalkState::Continue

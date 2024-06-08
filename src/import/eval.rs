@@ -19,6 +19,7 @@ use crate::path::{Distance, Edge, Position, Subpath, Trace};
 use super::ast;
 use super::ast::ShortString;
 use super::path::ImportPath;
+use super::watch::WatchSet;
 
 
 //------------ Builtin -------------------------------------------------------
@@ -80,10 +81,12 @@ pub trait Builtin: Sized {
     ) -> Result<(), Failed>;
 
 
-    fn load(&self, path: &Path) -> Result<(), LoadErrors> {
+    fn load(
+        &self, path: &Path, watch: &mut WatchSet
+    ) -> Result<(), LoadErrors> {
         let scope = Scope::root(self);
         let mut err = LoadErrors::default();
-        self.load_dir(path, scope, &mut err);
+        self.load_dir(path, scope, &mut err, watch);
         err.check()
     }
 
@@ -92,6 +95,7 @@ pub trait Builtin: Sized {
         path: &Path,
         mut context: Scope<Self>,
         err: &mut LoadErrors,
+        watch: &mut WatchSet,
     ) {
         // Before we do anything else, we run init.map if it is present on the
         // context so that it can make global definitions.
@@ -119,7 +123,8 @@ pub trait Builtin: Sized {
                 Err(_) => continue, // And these, too.
             };
             if ftype.is_dir() {
-                self.load_dir(&entry.path(), Scope::new(&context), err);
+                watch.add(entry.path().into());
+                self.load_dir(&entry.path(), Scope::new(&context), err, watch);
             }
             else if ftype.is_file() {
                 let path = entry.path();
@@ -130,6 +135,7 @@ pub trait Builtin: Sized {
                     }
                 }
                 if path.extension().and_then(|s| s.to_str()) == Some("map") {
+                    watch.add(path.clone());
                     self.load_file(&path, &mut Scope::new(&context), err);
                 }
             }

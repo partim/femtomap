@@ -8,4 +8,5 @@ pub use self::eval::Failed;
 pub mod ast;
 pub mod eval;
 pub mod path;
+pub mod watch;
 
