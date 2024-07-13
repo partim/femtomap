@@ -28,7 +28,7 @@ impl<P: Properties> Layout<P> {
     }
 
     pub fn vbox(
-        halign: Align, vbase: Align, properties: P, lines: Vec<Block<P>>
+        halign: Align, vbase: Base, properties: P, lines: Vec<Block<P>>
     ) -> Self {
         Self::new(LayoutContent::Vbox(
             Vbox::new(halign, vbase, properties, lines))
@@ -36,7 +36,7 @@ impl<P: Properties> Layout<P> {
     }
 
     pub fn hbox(
-        hbase: Align, valign: Align, properties: P, rows: Vec<Block<P>>
+        hbase: Base, valign: Align, properties: P, rows: Vec<Block<P>>
     ) -> Self {
         Self::new(LayoutContent::Hbox(
             Hbox::new(hbase, valign, properties, rows))
@@ -112,7 +112,7 @@ impl<P: Properties> Block<P> {
     }
 
     pub fn vbox(
-        halign: Align, vbase: Align, properties: P, lines: Vec<Block<P>>
+        halign: Align, vbase: Base, properties: P, lines: Vec<Block<P>>
     ) -> Self {
         Self::new(
             BlockContent::Vbox(Vbox::new(halign, vbase, properties, lines))
@@ -120,7 +120,7 @@ impl<P: Properties> Block<P> {
     }
 
     pub fn hbox(
-        hbase: Align, valign: Align, properties: P, rows: Vec<Block<P>>
+        hbase: Base, valign: Align, properties: P, rows: Vec<Block<P>>
     ) -> Self {
         Self::new(
             BlockContent::Hbox(Hbox::new(hbase, valign, properties, rows))
@@ -202,7 +202,7 @@ struct Vbox<P: Properties> {
     halign: Align,
 
     /// The vertical base of the box.
-    vbase: Align,
+    vbase: Base,
 
     /// The properties of the box.
     properties: P,
@@ -213,7 +213,7 @@ struct Vbox<P: Properties> {
 
 impl<P: Properties> Vbox<P> {
     fn new(
-        halign: Align, vbase: Align, properties: P, lines: Vec<Block<P>>
+        halign: Align, vbase: Base, properties: P, lines: Vec<Block<P>>
     ) -> Self {
         Vbox { halign, vbase, properties, lines }
     }
@@ -238,7 +238,22 @@ impl<P: Properties> Vbox<P> {
         for item in &self.lines {
             let mut shape = match item.shape_content(style, canvas) {
                 Some(shape) => shape,
-                None => continue,
+                None => {
+                    // The only non-shape block is currently anchor. So
+                    // update ybase if necessary.
+                    match self.vbase {
+                        Base::FirstAnchor => {
+                            if ybase.is_none() {
+                                ybase = Some(inner.y1);
+                            }
+                        }
+                        Base::LastAnchor => {
+                            ybase = Some(inner.y1);
+                        }
+                        _ => { }
+                    }
+                    continue;
+                }
             };
 
             // Shift vertically to the bottom of the stack. Remember that the
@@ -265,40 +280,53 @@ impl<P: Properties> Vbox<P> {
 
             // Update the vertical base if necessary.
             match self.vbase {
-                Align::Start | Align::Center | Align::End => { }
-                Align::Base => { // Base::FirstBase
+                Base::FirstBase => {
                     if ybase.is_none() {
                         ybase = Some(shape.base.y);
                     }
                 }
+                Base::LastBase => {
+                    ybase = Some(shape.base.y);
+                }
+                _ => { }
             }
 
             children.push(shape);
         }
+
+        let center = inner.center();
+        let base = Vec2::new(
+            0.,
+            match self.vbase {
+                Base::Start => inner.y0,
+                Base::Center => center.y,
+                Base::End => inner.y1,
+                Base::LastAnchor => ybase.unwrap_or(inner.y1),
+                _ => ybase.unwrap_or(0.),
+            }
+        );
+
+        let padded = self.properties.padding(style).grow_rect(inner);
+        let (frame, outer) = frame_and_outer_extents(
+            &self.properties, style, inner
+        );
 
         // Grow all hrules to the full width of the box.
         for item in &mut children {
             if matches!(item.shape, Shape::Rule { horizontal: true }) {
                 item.inner.x0 = inner.x0;
                 item.inner.x1 = inner.x1;
+                if let Some(item_frame) = item.frame.as_mut() {
+                    item_frame.x0 = frame.map(|f| f.x0).unwrap_or(inner.x0);
+                    item_frame.x1 = frame.map(|f| f.x1).unwrap_or(inner.x1);
+                }
+                item.outer.x0 = outer.x0;
+                item.outer.x1 = outer.x1;
             }
         }
 
-        let center = inner.center();
-        let base = match self.vbase {
-            Align::Start => Vec2::new(0., inner.y0),
-            Align::Center => Vec2::new(0., center.y),
-            Align::Base => Vec2::new(0., ybase.unwrap_or(0.)),
-            Align::End => Vec2::new(0., inner.y1),
-        };
-
-        let inner = self.properties.padding(style).grow_rect(inner);
-        let (frame, outer) = frame_and_outer_extents(
-            &self.properties, style, inner
-        );
-
         ShapedBlock {
-            inner, frame, outer, center, base,
+            inner: padded, frame, outer, center, base,
             shape: Shape::Box { children },
             properties: &self.properties,
         }
@@ -311,7 +339,7 @@ impl<P: Properties> Vbox<P> {
 /// A sequence of layouts stacked horizontally.
 #[derive(Clone, Debug)]
 struct Hbox<P: Properties> {
-    hbase: Align,
+    hbase: Base,
     valign: Align,
     properties: P,
     columns: Vec<Block<P>>,
@@ -319,7 +347,7 @@ struct Hbox<P: Properties> {
 
 impl<P: Properties> Hbox<P> {
     fn new(
-        hbase: Align, valign: Align, properties: P, columns: Vec<Block<P>>
+        hbase: Base, valign: Align, properties: P, columns: Vec<Block<P>>
     ) -> Self {
         Hbox { hbase, valign, properties, columns }
     }
@@ -344,7 +372,22 @@ impl<P: Properties> Hbox<P> {
         for item in &self.columns {
             let mut shape = match item.shape_content(style, canvas) {
                 Some(shape) => shape,
-                None => continue,
+                None => {
+                    // The only non-shape block is currently anchor. So
+                    // update ybase if necessary.
+                    match self.hbase {
+                        Base::FirstAnchor => {
+                            if xbase.is_none() {
+                                xbase = Some(inner.x1);
+                            }
+                        }
+                        Base::LastAnchor => {
+                            xbase = Some(inner.x1);
+                        }
+                        _ => { }
+                    }
+                    continue;
+                }
             };
 
             // Shift horizontally to the right end of the stack.
@@ -370,12 +413,15 @@ impl<P: Properties> Hbox<P> {
 
             // Update the vertical base if necessary.
             match self.hbase {
-                Align::Start | Align::Center | Align::End => { }
-                Align::Base => { // Base::FirstBase
+                Base::FirstBase => {
                     if xbase.is_none() {
                         xbase = Some(shape.base.x);
                     }
                 }
+                Base::LastBase => {
+                    xbase = Some(shape.base.x);
+                }
+                _ => { }
             }
 
             children.push(shape);
@@ -390,12 +436,16 @@ impl<P: Properties> Hbox<P> {
         }
 
         let center = inner.center();
-        let base = match self.hbase {
-            Align::Start => Vec2::new(inner.x0, 0.),
-            Align::Center => Vec2::new(center.x, 0.),
-            Align::Base => Vec2::new(xbase.unwrap_or(0.), 0.),
-            Align::End => Vec2::new(inner.x1, 0.),
-        };
+        let base = Vec2::new(
+            match self.hbase {
+                Base::Start => inner.x0,
+                Base::Center => center.x,
+                Base::End => inner.x1,
+                Base::LastAnchor => xbase.unwrap_or(inner.x1),
+                _ => xbase.unwrap_or(0.),
+            },
+            0.
+        );
 
         let inner = self.properties.padding(style).grow_rect(inner);
         let (frame, outer) = frame_and_outer_extents(
