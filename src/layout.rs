@@ -5,128 +5,187 @@ use kurbo::{PathEl, Point, Rect, Vec2};
 use crate::render::{Canvas, Font, OutlineIter, Sketch, Text};
 
 
-//------------ Block ---------------------------------------------------------
+//------------ Layout ---------------------------------------------------------
 
-/// A block is something that contains a layout.
-pub struct Block<P: Properties> {
-    content: Layout<P>,
+/// A layout is an arrangement of text.
+#[derive(Clone, Debug)]
+pub struct Layout<P: Properties> {
+    content: LayoutContent<P>,
 }
 
-impl<P: Properties> Block<P> {
-    pub fn new(content: Layout<P>) -> Self {
-        Block {
+#[derive(Clone, Debug)]
+enum LayoutContent<P: Properties> {
+    Vbox(Vbox<P>),
+    Hbox(Hbox<P>),
+    Span(Span<P>),
+}
+
+impl<P: Properties> Layout<P> {
+    fn new(content: LayoutContent<P>) -> Self {
+        Layout {
             content
+        }
+    }
+
+    pub fn vbox(
+        halign: Align, vbase: Align, properties: P, lines: Vec<Block<P>>
+    ) -> Self {
+        Self::new(LayoutContent::Vbox(
+            Vbox::new(halign, vbase, properties, lines))
+        )
+    }
+
+    pub fn hbox(
+        hbase: Align, valign: Align, properties: P, rows: Vec<Block<P>>
+    ) -> Self {
+        Self::new(LayoutContent::Hbox(
+            Hbox::new(hbase, valign, properties, rows))
+        )
+    }
+
+    pub fn span(text: P::SpanText, properties: P) -> Self {
+        Self::new(LayoutContent::Span(Span::new(text, properties)))
+    }
+
+    pub fn properties(&self) -> &P {
+        match &self.content {
+            LayoutContent::Vbox(inner) => &inner.properties,
+            LayoutContent::Hbox(inner) => &inner.properties,
+            LayoutContent::Span(inner) => &inner.properties,
         }
     }
 
     pub fn update_properties(
         &mut self, base: &P, op: impl Fn(&mut P, &P),
     ) {
-        self.content.update_properties(base, &op)
-    }
-
-    pub fn shape(&self, style: &P::Style, canvas: &Canvas) -> ShapedLayout<P>
-    where P: Properties {
-        self.content.shape_content(style, canvas)
-    }
-}
-
-
-//------------ Layout --------------------------------------------------------
-
-/// A layout is an arrangement of text.
-///
-/// The layout can contain final content – a span, an hrule, or a vrule – or
-/// a sequence of other layouts arranged horizontally or vertically – an hbox
-/// or vbox, respecitvely.
-///
-/// For a given canvas, a layout can determine its _extent_ which describes
-/// how far the layout’s content would stretch away from a central point
-/// called the _anchor_ in all four directions. The extent is used to stack
-/// layouts: multiple layouts are placed in such a way that their extents
-/// touch.
-#[derive(Clone, Debug)]
-pub struct Layout<P: Properties> {
-    /// The content of the layout.
-    content: Content<P>,
-}
-
-#[derive(Clone, Debug)]
-enum Content<P: Properties> {
-    Vbox(Vbox<P>),
-    Hbox(Hbox<P>),
-    Span(Span<P>),
-    Rule(Rule<P>),
-}
-
-impl<P: Properties> Layout<P> {
-    fn new(content: Content<P>) -> Self {
-        Layout { content }
-    }
-
-    pub fn vbox(
-        halign: Align, vbase: Align, properties: P, lines: Vec<Layout<P>>
-    ) -> Self {
-        Self::new(Content::Vbox(Vbox::new(halign, vbase, properties, lines)))
-    }
-
-    pub fn hbox(
-        hbase: Align, valign: Align, properties: P, rows: Vec<Layout<P>>
-    ) -> Self {
-        Self::new(Content::Hbox(Hbox::new(hbase, valign, properties, rows)))
-    }
-
-    pub fn span(text: P::SpanText, properties: P) -> Self {
-        Self::new(Content::Span(Span::new(text, properties)))
-    }
-
-    pub fn hrule(properties: P) -> Self {
-        Self::new(Content::Rule(Rule::new(true, properties)))
-    }
-
-    pub fn vrule(properties: P) -> Self {
-        Self::new(Content::Rule(Rule::new(false, properties)))
-    }
-
-    pub fn properties(&self) -> &P {
-        match self.content {
-            Content::Vbox(ref inner) => &inner.properties,
-            Content::Hbox(ref inner) => &inner.properties,
-            Content::Span(ref inner) => &inner.properties,
-            Content::Rule(ref inner) => &inner.properties,
+        match &mut self.content {
+            LayoutContent::Vbox(inner) => inner.update_properties(base, &op),
+            LayoutContent::Hbox(inner) => inner.update_properties(base, &op),
+            LayoutContent::Span(inner) => inner.update_properties(base, &op),
         }
     }
 
     pub fn properties_mut(&mut self) -> &mut P {
-        match self.content {
-            Content::Vbox(ref mut inner) => &mut inner.properties,
-            Content::Hbox(ref mut inner) => &mut inner.properties,
-            Content::Span(ref mut inner) => &mut inner.properties,
-            Content::Rule(ref mut inner) => &mut inner.properties,
+        match &mut self.content {
+            LayoutContent::Vbox(ref mut inner) => &mut inner.properties,
+            LayoutContent::Hbox(ref mut inner) => &mut inner.properties,
+            LayoutContent::Span(ref mut inner) => &mut inner.properties,
         }
+    }
+
+    pub fn shape(
+        &self, base: Vec2, style: &P::Style, canvas: &Canvas
+    ) -> ShapedLayout<P>
+    where P: Properties {
+        let mut block = match &self.content {
+            LayoutContent::Vbox(inner) => inner.shape(style, canvas),
+            LayoutContent::Hbox(inner) => inner.shape(style, canvas),
+            LayoutContent::Span(inner) => inner.shape(style, canvas),
+        };
+        block.shift(-block.base + base);
+        ShapedLayout { block }
+    }
+}
+
+
+//------------ Block --------------------------------------------------------
+
+/// A block is a component of a layout.
+#[derive(Clone, Debug)]
+pub struct Block<P: Properties> {
+    /// The content of the block.
+    content: BlockContent<P>,
+}
+
+#[derive(Clone, Debug)]
+enum BlockContent<P: Properties> {
+    Vbox(Vbox<P>),
+    Hbox(Hbox<P>),
+    Span(Span<P>),
+    Rule(Rule<P>),
+    Anchor,
+}
+
+impl<P: Properties> Block<P> {
+    fn new(content: BlockContent<P>) -> Self {
+        Block { content }
+    }
+
+    pub fn vbox(
+        halign: Align, vbase: Align, properties: P, lines: Vec<Block<P>>
+    ) -> Self {
+        Self::new(
+            BlockContent::Vbox(Vbox::new(halign, vbase, properties, lines))
+        )
+    }
+
+    pub fn hbox(
+        hbase: Align, valign: Align, properties: P, rows: Vec<Block<P>>
+    ) -> Self {
+        Self::new(
+            BlockContent::Hbox(Hbox::new(hbase, valign, properties, rows))
+        )
+    }
+
+    pub fn span(text: P::SpanText, properties: P) -> Self {
+        Self::new(BlockContent::Span(Span::new(text, properties)))
+    }
+
+    pub fn hrule(properties: P) -> Self {
+        Self::new(BlockContent::Rule(Rule::new(true, properties)))
+    }
+
+    pub fn vrule(properties: P) -> Self {
+        Self::new(BlockContent::Rule(Rule::new(false, properties)))
+    }
+
+    pub fn anchor() -> Self {
+        Self::new(BlockContent::Anchor)
     }
 
     fn update_properties(
         &mut self, base: &P, op: &impl Fn(&mut P, &P),
     ) {
         match self.content {
-            Content::Vbox(ref mut inner) => inner.update_properties(base, op),
-            Content::Hbox(ref mut inner) => inner.update_properties(base, op),
-            Content::Span(ref mut inner) => inner.update_properties(base, op),
-            Content::Rule(ref mut inner) => inner.update_properties(base, op),
+            BlockContent::Vbox(ref mut inner) => {
+                inner.update_properties(base, op)
+            }
+            BlockContent::Hbox(ref mut inner) => {
+                inner.update_properties(base, op)
+            }
+            BlockContent::Span(ref mut inner) => {
+                inner.update_properties(base, op)
+            }
+            BlockContent::Rule(ref mut inner) => {
+                inner.update_properties(base, op)
+            }
+            BlockContent::Anchor => { }
         }
     }
 }
 
-impl<P: Properties> Layout<P> {
+impl<P: Properties> Block<P> {
     fn shape_content(
         &self, style: &P::Style, canvas: &Canvas
-    ) -> ShapedLayout<P> {
+    ) -> Option<ShapedBlock<P>> {
         match self.content {
-            Content::Vbox(ref vbox) => vbox.shape(style, canvas),
-            Content::Hbox(ref hbox) => hbox.shape(style, canvas),
-            Content::Span(ref span) => span.shape(style, canvas),
-            Content::Rule(ref rule) => rule.shape(style, canvas),
+            BlockContent::Vbox(ref vbox) => Some(vbox.shape(style, canvas)),
+            BlockContent::Hbox(ref hbox) => Some(hbox.shape(style, canvas)),
+            BlockContent::Span(ref span) => Some(span.shape(style, canvas)),
+            BlockContent::Rule(ref rule) => Some(rule.shape(style, canvas)),
+            BlockContent::Anchor => None
+        }
+    }
+}
+
+impl<P: Properties> From<Layout<P>> for Block<P> {
+    fn from(src: Layout<P>) -> Self {
+        Self {
+            content: match src.content {
+                LayoutContent::Vbox(inner) => BlockContent::Vbox(inner),
+                LayoutContent::Hbox(inner) => BlockContent::Hbox(inner),
+                LayoutContent::Span(inner) => BlockContent::Span(inner),
+            }
         }
     }
 }
@@ -149,12 +208,12 @@ struct Vbox<P: Properties> {
     properties: P,
 
     /// The content.
-    lines: Vec<Layout<P>>,
+    lines: Vec<Block<P>>,
 }
 
 impl<P: Properties> Vbox<P> {
     fn new(
-        halign: Align, vbase: Align, properties: P, lines: Vec<Layout<P>>
+        halign: Align, vbase: Align, properties: P, lines: Vec<Block<P>>
     ) -> Self {
         Vbox { halign, vbase, properties, lines }
     }
@@ -170,87 +229,77 @@ impl<P: Properties> Vbox<P> {
 
     fn shape(
         &self, style: &P::Style, canvas: &Canvas
-    ) -> ShapedLayout<P>
+    ) -> ShapedBlock<P>
     where P: Properties {
-        // We do this in two steps: First we shape all the contained layouts.
-        // Then we shift each layout to its final position.
-        //
-        // Pre-calculate the inner size. Grow horizontally with the layout
-        // sizes and just add up the vertical size.
-        let mut extents = Rect::default();
-
-        /*
-        // Remember the vertical position of the first explicit base if it
-        // comes up.
-        let mut base = None;
-        */
-
-        let mut children: Vec<_> = self.lines.iter().map(|layout| {
-            let res = layout.shape_content(style, canvas);
-
-            if res.outer.x0 < extents.x0 {
-                extents.x0 = res.outer.x0
-            }
-            if res.outer.x1 > extents.x1 {
-                extents.x1 = res.outer.x1
-            }
-            extents.y1 += res.outer.y1 - res.outer.y0;
-            res
-        }).collect();
-
         let mut inner = Rect::default();
+        let mut children = Vec::with_capacity(self.lines.len());
+        let mut ybase = None;
 
-        if !children.is_empty() {
-            // Determine the final top. This depends on the vertical base.
-            let mut top = match self.vbase {
-                Align::Start => 0.,
-                Align::Center => -extents.y1 / 2.,
-                Align::Base => {
-                    /*
-                    match base {
-                        Some(base) => -base,
-                        None => children[0].outer.y0
-                    }
-                    */
-                    children[0].outer.y0
-                }
-                Align::End => -extents.y1
+        for item in &self.lines {
+            let mut shape = match item.shape_content(style, canvas) {
+                Some(shape) => shape,
+                None => continue,
             };
 
-            // Now shift each child.
-            children.iter_mut().for_each(|shape| {
-                // Grow a horizontal rule to the width of the whole box.
-                if let Shape::Rule { horizontal: true } = shape.shape {
-                    shape.inner.x1 = extents.width();
-                    if let Some(frame) = shape.frame.as_mut() {
-                        frame.x1 += extents.width();
+            // Shift vertically to the bottom of the stack. Remember that the
+            // outer rect’s y0 can be non-null.
+            let yoff = inner.y1 - shape.outer.y0;
+
+            // Shift horizontally according to the alignment.
+            let xoff = match self.halign {
+                // The leftmost point needs to be at 0.
+                Align::Start => -shape.outer.x0,
+
+                // The center needs to be at 0.
+                Align::Center => -shape.center.x,
+
+                // The base needs to be at 0.
+                Align::Base => -shape.base.x,
+
+                // The rightmost point needs to be at 0.
+                Align::End => -shape.outer.x1,
+            };
+
+            shape.shift(Vec2::new(xoff, yoff));
+            inner = inner.union(shape.outer);
+
+            // Update the vertical base if necessary.
+            match self.vbase {
+                Align::Start | Align::Center | Align::End => { }
+                Align::Base => { // Base::FirstBase
+                    if ybase.is_none() {
+                        ybase = Some(shape.base.y);
                     }
-                    shape.outer.x1 += extents.width();
                 }
+            }
 
-                let left = match self.halign {
-                    Align::Start => -shape.outer.x0,
-                    Align::Center => {
-                        -shape.outer.width() / 2. - shape.outer.x0
-                    }
-                    Align::Base => 0.,
-                    Align::End => -shape.outer.x1,
-                };
-                shape.shift(Vec2::new(left, top - shape.outer.y0));
-
-                top += shape.outer.height();
-                inner = inner.union(shape.outer + shape.offset);
-            });
+            children.push(shape);
         }
 
+        // Grow all hrules to the full width of the box.
+        for item in &mut children {
+            if matches!(item.shape, Shape::Rule { horizontal: true }) {
+                item.inner.x0 = inner.x0;
+                item.inner.x1 = inner.x1;
+            }
+        }
+
+        let center = inner.center();
+        let base = match self.vbase {
+            Align::Start => Vec2::new(0., inner.y0),
+            Align::Center => Vec2::new(0., center.y),
+            Align::Base => Vec2::new(0., ybase.unwrap_or(0.)),
+            Align::End => Vec2::new(0., inner.y1),
+        };
+
+        let inner = self.properties.padding(style).grow_rect(inner);
         let (frame, outer) = frame_and_outer_extents(
             &self.properties, style, inner
         );
 
-        ShapedLayout {
-            offset: Vec2::default(),
-            inner, frame, outer,
-            shape: Shape::Box { children }, 
+        ShapedBlock {
+            inner, frame, outer, center, base,
+            shape: Shape::Box { children },
             properties: &self.properties,
         }
     }
@@ -265,12 +314,12 @@ struct Hbox<P: Properties> {
     hbase: Align,
     valign: Align,
     properties: P,
-    columns: Vec<Layout<P>>,
+    columns: Vec<Block<P>>,
 }
 
 impl<P: Properties> Hbox<P> {
     fn new(
-        hbase: Align, valign: Align, properties: P, columns: Vec<Layout<P>>
+        hbase: Align, valign: Align, properties: P, columns: Vec<Block<P>>
     ) -> Self {
         Hbox { hbase, valign, properties, columns }
     }
@@ -286,116 +335,75 @@ impl<P: Properties> Hbox<P> {
 
     fn shape(
         &self, style: &P::Style, canvas: &Canvas
-    ) ->ShapedLayout<P>
+    ) -> ShapedBlock<P>
     where P: Properties {
-        // This is the same as for a vertical box except with horizontal and
-        // vertical swapped. Well, d’oh.
-
-        // Pre-calculate the inner size. Grow vertically with the layout
-        // sizes and just add up the horizontal size.
-        let mut extents = Rect::default();
-
-        // Adjust for padding. Left padding is an initial advance.
-        let padding = self.properties.padding(style);
-        extents.x1 = padding.left;
-
-        /*
-        // Remember the horizontal position of the first explicit base if it
-        // comes up.
-        let mut base = None;
-        */
-
-        let mut children: Vec<_> = self.columns.iter().map(|layout| {
-            let res = layout.shape_content(style, canvas);
-
-            if res.outer.y0 < extents.y0 {
-                extents.y0 = res.outer.y0
-            }
-            if res.outer.y1 > extents.y1 {
-                extents.y1 = res.outer.y1
-            }
-            extents.x1 += res.outer.x1 - res.outer.x0;
-            res
-        }).collect();
-
-        // Add the remaining padding.
-        extents.x1 += padding.right;
-        extents.y0 -= padding.bottom;
-        extents.y1 += padding.top;
-
         let mut inner = Rect::default();
+        let mut children = Vec::with_capacity(self.columns.len());
+        let mut xbase = None;
 
-        if !children.is_empty() {
-            // Determine the final left. This depends on the horizontal base.
-            let mut left = match self.hbase {
-                Align::Start => padding.left,
-                Align::Center => -(extents.x1 / 2. - padding.left),
-                Align::Base => {
-                    /*
-                    match base {
-                        Some(base) => -base,
-                        None => children[0].outer.x0
-                    }
-                    */
-                    children[0].outer.x0
-                }
-                Align::End => -(extents.x1 - padding.left),
+        for item in &self.columns {
+            let mut shape = match item.shape_content(style, canvas) {
+                Some(shape) => shape,
+                None => continue,
             };
 
-            // Now shift each child.
-            children.iter_mut().for_each(|shape| {
-                // Grow a vertical rule to the height of the whole box.
-                if let Shape::Rule { horizontal: false } = shape.shape {
-                    shape.inner.y1 = extents.height();
-                    if let Some(frame) = shape.frame.as_mut() {
-                        frame.y1 += extents.height();
-                    }
-                    shape.outer.y1 += extents.height();
-                }
+            // Shift horizontally to the right end of the stack.
+            let xoff = inner.x1 - shape.outer.x0;
 
-                let top = match self.valign {
-                    Align::Start => -shape.outer.y0 + padding.top,
-                    Align::Center => {
-                        -shape.outer.height() / 2. - shape.outer.y0
-                    }
-                    Align::Base => 0.,
-                    Align::End => -shape.outer.y1 - padding.bottom,
-                };
-                shape.shift(
-                    Vec2::new(left - shape.outer.x0, top)
-                );
+            // Shift horizontally according to the alignment.
+            let yoff = match self.valign {
+                // The topmost point needs to be at 0.
+                Align::Start => -shape.outer.y0,
 
-                left += shape.outer.width();
-                inner = inner.union(shape.outer + shape.offset);
-            });
+                // The center needs to be at 0.
+                Align::Center => -shape.center.y,
 
+                // The base needs to be at 0.
+                Align::Base => -shape.base.y,
+
+                // The bottommost point needs to be at 0.
+                Align::End => -shape.outer.y1,
+            };
+
+            shape.shift(Vec2::new(xoff, yoff));
+            inner = inner.union(shape.outer);
+
+            // Update the vertical base if necessary.
             match self.hbase {
-                Align::Start => inner.x1 += padding.right,
-                Align::Center => {
-                    inner.x0 -= padding.left;
-                    inner.x1 += padding.right
+                Align::Start | Align::Center | Align::End => { }
+                Align::Base => { // Base::FirstBase
+                    if xbase.is_none() {
+                        xbase = Some(shape.base.x);
+                    }
                 }
-                Align::Base =>  { },
-                Align::End => inner.x0 -= padding.left,
             }
-            match self.valign {
-                Align::Start => inner.y1 += padding.bottom,
-                Align::Center => {
-                    inner.y1 += padding.bottom;
-                    inner.y0 -= padding.top;
-                }
-                Align::End => inner.y0 -= padding.top,
-                _ => { }
+
+            children.push(shape);
+        }
+
+        // Grow all vrules to the full height of the box.
+        for item in &mut children {
+            if matches!(item.shape, Shape::Rule { horizontal: false }) {
+                item.inner.y0 = inner.y0;
+                item.inner.y1 = inner.y1;
             }
         }
 
+        let center = inner.center();
+        let base = match self.hbase {
+            Align::Start => Vec2::new(inner.x0, 0.),
+            Align::Center => Vec2::new(center.x, 0.),
+            Align::Base => Vec2::new(xbase.unwrap_or(0.), 0.),
+            Align::End => Vec2::new(inner.x1, 0.),
+        };
+
+        let inner = self.properties.padding(style).grow_rect(inner);
         let (frame, outer) = frame_and_outer_extents(
             &self.properties, style, inner
         );
 
-        ShapedLayout {
-            offset: Vec2::default(),
-            inner, frame, outer,
+        ShapedBlock {
+            inner, frame, outer, center, base,
             shape: Shape::Box { children },
             properties: &self.properties,
         }
@@ -425,7 +433,7 @@ impl<P: Properties> Span<P> {
 
     fn shape(
         &self, style: &P::Style, canvas: &Canvas
-    ) -> ShapedLayout<P>
+    ) -> ShapedBlock<P>
     where P: Properties {
         let text = canvas.prepare_text(
             self.properties.span_text(&self.text, style),
@@ -438,39 +446,6 @@ impl<P: Properties> Span<P> {
         }
         else {
             metrics.logical()
-            /*
-            let advance = metrics.advance();
-
-            if advance.x != 0. {
-                // Horizontal text.
-                //
-                // The span between 0. and advance.x is the
-                // width, but consider that the advance may be negative for
-                // right-to-left text.
-                //
-                // For the height, we assume we have a single line and use
-                // the ascender plus the line height.
-                Rect::new(
-                    if advance.x < 0. { advance.x } else { 0. },
-                    -metrics.ascent(),
-                    if advance.x > 0. { advance.x } else { 0. },
-                    -metrics.ascent() + (
-                        metrics.line_height()
-                        * self.properties.line_height(style)
-                    )
-                )
-            }
-            else {
-                // XXX Vertical text. I have no idea. Let’s use the advance
-                // v. zero.
-                Rect::new(
-                    if advance.x < 0. { advance.x } else { 0. },
-                    if advance.y < 0. { advance.y } else { 0. },
-                    if advance.x > 0. { advance.x } else { 0. },
-                    if advance.y > 0. { advance.y } else { 0. },
-                )
-            }
-            */
         };
 
         let inner = self.properties.padding(style).grow_rect(extents);
@@ -478,9 +453,10 @@ impl<P: Properties> Span<P> {
             &self.properties, style, inner
         );
 
-        ShapedLayout {
-            offset: Vec2::default(),
+        ShapedBlock {
             inner, frame, outer,
+            base: Vec2::default(),
+            center: inner.center(),
             shape: Shape::Span { text },
             properties: &self.properties,
         }
@@ -510,16 +486,17 @@ impl<P> Rule<P> {
 
     fn shape(
         &self, style: &P::Style, _: &Canvas
-    ) -> ShapedLayout<P>
+    ) -> ShapedBlock<P>
     where P: Properties {
         let inner = Rect::default();
         let (frame, outer) = frame_and_outer_extents(
             &self.properties, style, inner
         );
 
-        ShapedLayout {
-            offset: Vec2::default(),
+        ShapedBlock {
             inner, frame, outer,
+            base: Vec2::default(),
+            center: Point::default(),
             shape: Shape::Rule { horizontal: self.horizontal },
             properties: &self.properties,
         }
@@ -530,10 +507,6 @@ impl<P> Rule<P> {
 //------------ Properties ----------------------------------------------------
 
 /// A type that can provide properties for a layout.
-///
-/// Most of the properties are derived from the properties of the parent.
-/// Thus the method `derive_properties` receives the parent properties plus
-/// a style value of the implementers own chosing.
 pub trait Properties: Sized {
     /// The style that carries more information for deriving the properties.
     type Style;
@@ -602,9 +575,8 @@ pub trait Properties: Sized {
     /// Renders a shaped layout.
     fn render(
         &self,
-        layout: &ShapedLayout<Self>,
+        layout: &ShapedBlock<Self>,
         style: &Self::Style,
-        base: Vec2,
         stage: &Self::Stage,
         canvas: &mut Sketch,
     );
@@ -650,6 +622,34 @@ pub enum Align {
 }
 
 
+//------------ Base ----------------------------------------------------------
+
+/// Where the base of a box is located.
+#[derive(Clone, Copy, Debug)]
+pub enum Base {
+    /// The upper or left extent forms the base.
+    Start,
+
+    /// The base of the first item forms the base.
+    FirstBase,
+
+    /// The base is the first anchor item of the box.
+    FirstAnchor,
+
+    /// The center of the layout forms the base.
+    Center,
+
+    /// The base is the last anchor item of the box.
+    LastAnchor,
+
+    /// The base of the last item forms the base.
+    LastBase,
+
+    /// The lower or right extent forms the base
+    End,
+}
+
+
 //------------ Margins -------------------------------------------------------
 
 /// How layouts are stacked in a box.
@@ -685,16 +685,29 @@ impl Margins {
 }
 
 
-//============ Shaped Layouts ================================================
+//============ Shaped Objects ===============================================
 
-//------------ ShapedLayout --------------------------------------------------
+//------------ ShapedLayout -------------------------------------------------
 
 /// A shaped layout ready to be rendered.
 #[derive(Clone, Debug)]
 pub struct ShapedLayout<'a, P> {
-    /// The offset from the overall origin to the layout’s own origin.
-    offset: Vec2,
+    block: ShapedBlock<'a, P>,
+}
 
+impl<'a, P: Properties> ShapedLayout<'a, P> {
+    pub fn render(
+        &self, style: &P::Style, stage: &P::Stage, canvas: &mut Sketch,
+    ) {
+        self.block.render(style, stage, canvas);
+    }
+}
+
+//------------ ShapedBlock --------------------------------------------------
+
+/// A shaped block ready to be rendered.
+#[derive(Clone, Debug)]
+pub struct ShapedBlock<'a, P> {
     /// The extents of the contents.
     ///
     /// This includes the actual contents plus padding.
@@ -710,6 +723,12 @@ pub struct ShapedLayout<'a, P> {
     /// This is the frame grown by the margins.
     outer: Rect,
 
+    /// The center of the layout.
+    center: Point,
+
+    /// The base of the layout.
+    base: Vec2,
+
     /// The shape of the content.
     shape: Shape<'a, P>,
 
@@ -720,43 +739,48 @@ pub struct ShapedLayout<'a, P> {
 /// The shape of the content of a layout.
 #[derive(Clone, Debug)]
 enum Shape<'a, P> {
-    /// The layout is a span of text.
+    /// The shape is a span of text.
     Span {
         /// The shaped text to be rendered.
         text: Text<'a>,
     },
 
-    /// The layout is a rule.
+    /// The shape is a rule.
     Rule {
         /// Is this a horizontal rule?
         horizontal: bool,
     },
 
-    /// The layout is a box containing other layouts.
+    /// The shape is a box containing other blocks.
     Box {
         /// Those other layouts.
-        children: Vec<ShapedLayout<'a, P>>,
+        children: Vec<ShapedBlock<'a, P>>,
     }
 }
 
-impl<'a, P> ShapedLayout<'a, P> {
+impl<'a, P> ShapedBlock<'a, P> {
     pub fn shift(&mut self, offset: Vec2) {
-        self.offset += offset;
+        self.inner = self.inner + offset;
+        if let Some(frame) = self.frame.as_mut() {
+            *frame = *frame + offset;
+        }
+        self.outer = self.outer + offset;
+        self.center = self.center + offset;
+        self.base = self.base + offset;
+
         if let Shape::Box { ref mut children } = self.shape {
             children.iter_mut().for_each(|child| child.shift(offset));
         }
     }
 
-    pub fn render(
-        &self, style: &P::Style,
-        base: Vec2, stage: &P::Stage,
-        canvas: &mut Sketch,
+    fn render(
+        &self, style: &P::Style, stage: &P::Stage, canvas: &mut Sketch,
     )
     where P: Properties {
-        self.properties.render(self, style, base, stage, canvas);
+        self.properties.render(self, style, stage, canvas);
         if let Shape::Box { ref children } = self.shape {
             children.iter().for_each(|item| {
-                item.render(style, base, stage, canvas)
+                item.render(style, stage, canvas)
             })
         }
     }
@@ -769,31 +793,31 @@ impl<'a, P> ShapedLayout<'a, P> {
         self.frame.is_some()
     }
 
-    pub fn fill_text(&self, base: Vec2, canvas: &mut Sketch) {
+    pub fn fill_text(&self, canvas: &mut Sketch) {
         if let Shape::Span { ref text } = self.shape {
-            canvas.fill_text(text, (base + self.offset).to_point());
+            canvas.fill_text(text, self.base.to_point());
         }
     }
 
-    pub fn stroke_text(&self, base: Vec2, canvas: &mut Sketch) {
+    pub fn stroke_text(&self, canvas: &mut Sketch) {
         if let Shape::Span { ref text } = self.shape {
-            canvas.stroke_text(text, (base + self.offset).to_point());
+            canvas.stroke_text(text, self.base.to_point());
         }
     }
 
-    pub fn fill_background(&self, base: Vec2, canvas: &mut Sketch) {
-        canvas.apply(self.inner + base + self.offset);
+    pub fn fill_background(&self, canvas: &mut Sketch) {
+        canvas.apply(self.inner);
         canvas.fill();
     }
 
-    pub fn fill_frame(&self, base: Vec2, canvas: &mut Sketch) {
+    pub fn fill_frame(&self, canvas: &mut Sketch) {
         if let Some(frame) = self.frame {
-            let frame = frame + base + self.offset;
+            let frame = frame;
             if
                 self.inner.x0 != self.inner.x1
                 || self.inner.y0 != self.inner.y1
             {
-                let inner = self.inner + base + self.offset;
+                let inner = self.inner;
                 canvas.apply(
                     OutlineIter([
                         PathEl::MoveTo(Point::new(frame.x0, frame.y0)),
@@ -816,12 +840,12 @@ impl<'a, P> ShapedLayout<'a, P> {
         }
     }
 
-    pub fn inner(&self, base: Vec2) -> Rect {
-        self.inner + base + self.offset
+    pub fn inner(&self) -> Rect {
+        self.inner
     }
 
-    pub fn outer(&self, base: Vec2) -> Rect {
-        self.outer + base + self.offset
+    pub fn outer(&self) -> Rect {
+        self.outer
     }
 }
 
