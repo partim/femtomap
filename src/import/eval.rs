@@ -1457,6 +1457,16 @@ impl<'a, B: Builtin> ArgumentList<'a, B> {
         self.arguments.is_empty()
     }
 
+    pub fn into_empty(self, err: &mut EvalErrors) -> Result<(), Failed> {
+        if !self.is_empty() {
+            err.add(self.pos, format!("expected zero arguments"));
+            Err(Failed)
+        }
+        else {
+            Ok(())
+        }
+    }
+
     pub fn into_array<const N: usize>(
         self, err: &mut EvalErrors,
     ) -> Result<[Expression<'a, B>; N], Failed> {

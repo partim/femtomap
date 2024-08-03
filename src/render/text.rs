@@ -76,23 +76,9 @@ impl TextMetrics {
         self.logical
     }
 
-    /*
-    pub fn advance(&self) -> Point {
-        Point::new(self.text.x_advance(), self.text.y_advance())
+    pub fn center(&self) -> Point {
+        self.ink.center()
     }
-
-    pub fn ascent(&self) -> f64 {
-        self.font.ascent()
-    }
-
-    pub fn descent(&self) -> f64 {
-        self.font.descent()
-    }
-
-    pub fn line_height(&self) -> f64 {
-        self.font.height()
-    }
-    */
 }
 
 fn rect_from_pango(rect: pango::Rectangle) -> Rect {
