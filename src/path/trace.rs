@@ -661,11 +661,16 @@ impl<'a, S: Transform> Iterator for SubpathSegmentIter<'a, S> {
     type Item = Segment;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.forward {
-            self.next_forward()
-        }
-        else {
-            self.next_reverse()
+        loop {
+            let res = if self.forward {
+                self.next_forward()?
+            }
+            else {
+                self.next_reverse()?
+            };
+            if !res.is_empty() {
+                return Some(res)
+            }
         }
     }
 }
@@ -1004,6 +1009,13 @@ impl Segment {
             }
         }
         true
+    }
+
+    /// Returns whether the segment is empty.
+    ///
+    /// This happens when start and end of a straight segment are identical.
+    pub fn is_empty(self) -> bool {
+        self.control.is_none() && self.start == self.end
     }
 
     /// Returns the start point of the segment.
