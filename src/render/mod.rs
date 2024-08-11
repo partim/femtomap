@@ -2,7 +2,7 @@ pub use self::canvas::{
     Canvas, DashPattern, Group, LineCap, LineJoin, LineWidth, Matrix, Operator,
     Sketch, SketchProperty
 };
-pub use self::outline::{Outline, OutlineIter, Positions, PositionsIter};
+pub use self::outline::{Outline, OutlineIter, Positions, PositionIter};
 pub use self::pattern::{Color, InvalidHexColor, Pattern};
 pub use self::text::{
     Font, FontBuilder, FontFamily, FontFeatures, FontStretch, FontStyle,
