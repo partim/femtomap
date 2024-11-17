@@ -1327,7 +1327,7 @@ impl Segment {
         };
         let arclen = res.arclen();
         res.arclen = Some(arclen);
-        res.off_factor = arclen / self.arclen();
+        res.off_factor = self.off_factor * arclen / self.arclen();
         res
     }
 
