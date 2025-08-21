@@ -815,8 +815,8 @@ impl<'a, P> ShapedBlock<'a, P> {
             *frame = *frame + offset;
         }
         self.outer = self.outer + offset;
-        self.center = self.center + offset;
-        self.base = self.base + offset;
+        self.center += offset;
+        self.base += offset;
 
         if let Shape::Box { ref mut children } = self.shape {
             children.iter_mut().for_each(|child| child.shift(offset));
@@ -862,7 +862,6 @@ impl<'a, P> ShapedBlock<'a, P> {
 
     pub fn fill_frame(&self, canvas: &mut Sketch) {
         if let Some(frame) = self.frame {
-            let frame = frame;
             if
                 self.inner.x0 != self.inner.x1
                 || self.inner.y0 != self.inner.y1

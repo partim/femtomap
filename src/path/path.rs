@@ -488,7 +488,7 @@ pub type MapDistanceVec = SmallVec<[MapDistance; 1]>;
 /// points which is combined from a world distance and a map distance. This
 /// way we can create schematic representations that are pleasing at a range
 /// of scales.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Distance {
     /// The world component of the distance.
     ///
@@ -539,12 +539,6 @@ impl Distance {
         }
 
         res
-    }
-}
-
-impl Default for Distance {
-    fn default() -> Self {
-        Distance { world: None, map: Default::default() }
     }
 }
 

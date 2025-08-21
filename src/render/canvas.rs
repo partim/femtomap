@@ -271,7 +271,7 @@ pub trait SketchProperty {
     fn apply_to_sketch(self, sketch: &mut Sketch);
 }
 
-impl<'a> SketchProperty for &'a BezPath {
+impl SketchProperty for &'_ BezPath {
     fn apply_to_sketch(self, group: &mut Sketch) {
         OutlineIter(self).apply_to_sketch(group);
     }
@@ -444,6 +444,7 @@ impl Matrix {
     }
 
     fn convert(self, op: impl FnOnce(&mut cairo::Matrix)) -> Self {
+        #[allow(clippy::clone_on_copy)]
         let mut res = self.clone();
         op(&mut res.cairo);
         res
@@ -512,6 +513,7 @@ pub struct Path {
 }
 
 impl Path {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Path {
             path: BezPath::new(),

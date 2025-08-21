@@ -1,4 +1,5 @@
 //! Paths, traces, and positions.
+#![allow(clippy::module_inception)]
 
 pub use self::path::{
     Distance, Location, MapDistance, MapDistanceVec, Path, PathBuilder,

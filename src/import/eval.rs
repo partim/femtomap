@@ -10,7 +10,11 @@
 //! types herein are generic over this trait, expressed through the type
 //! argument `B`.
 
+// Needs thinking ...
+#![allow(clippy::manual_try_fold)]
+
 use std::{fmt, fs, io, ops};
+use std::collections::hash_map;
 use std::collections::HashMap;
 use std::path::Path;
 use std::str::FromStr;
@@ -123,13 +127,13 @@ pub trait Builtin: Sized {
                 Err(_) => continue, // And these, too.
             };
             if ftype.is_dir() {
-                watch.add(entry.path().into());
+                watch.add(entry.path());
                 self.load_dir(&entry.path(), Scope::new(&context), err, watch);
             }
             else if ftype.is_file() {
                 let path = entry.path();
                 if let Some(name) = path.file_name() {
-                    let name = name.to_str().unwrap_or(&"");
+                    let name = name.to_str().unwrap_or("");
                     if name.starts_with(".") || name == "init.map" {
                         continue
                     }
@@ -572,7 +576,7 @@ impl<'a, B: Builtin> Clone for Value<'a, B> {
             Text(value) => Text(value.clone()),
             Trace(value) => Trace(value.clone()),
             Vector(value) => Vector(value.clone()),
-            ImportPath(value) => ImportPath(*value),
+            ImportPath(value) => ImportPath(value),
             Custom(value) => Custom(value.clone()),
         }
     }
@@ -726,10 +730,6 @@ impl SymbolSet {
         }
         Ok(res)
     }
-
-    pub fn into_iter(self) -> impl Iterator<Item = ShortString> {
-        self.set.into_iter().map(|item| item.0)
-    }
 }
 
 impl<'a> PartialEq<&'a str> for SymbolSet {
@@ -738,6 +738,15 @@ impl<'a> PartialEq<&'a str> for SymbolSet {
             return false;
         }
         self.set.keys().next().map(|s| s.as_str()) == Some(other)
+    }
+}
+
+impl IntoIterator for SymbolSet {
+    type Item = ShortString;
+    type IntoIter = hash_map::IntoKeys<ShortString, Option<ast::Pos>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.set.into_keys()
     }
 }
 
@@ -848,7 +857,7 @@ impl ast::AssignmentList {
         for item in self.assignments {
             let pos = item.target.pos;
             let target = item.target.eval();
-            let expression = match item.expression.eval(&scope, err) {
+            let expression = match item.expression.eval(scope, err) {
                 Ok(expression) => expression,
                 Err(_) => continue,
             };
@@ -1068,9 +1077,9 @@ impl ast::Section {
     fn eval_subpath<B: Builtin>(
         self, base: &ImportPath, scope: &Scope<B>, err: &mut EvalErrors
     ) -> Result<Subpath, Failed> {
-        let start = self.start.eval_pair(&base, scope, err);
+        let start = self.start.eval_pair(base, scope, err);
         let end = match self.end {
-            Some(end) => end.eval_pair(&base, scope, err),
+            Some(end) => end.eval_pair(base, scope, err),
             None => {
                 err.add(self.pos, "expected subpath section");
                 return Err(Failed)
@@ -1103,7 +1112,7 @@ impl ast::Section {
             err.add(self.pos, "expected position section");
             return Err(Failed)
         }
-        let start = self.start.eval_pair(&base, scope, err);
+        let start = self.start.eval_pair(base, scope, err);
         let offset = self.offset.into_iter().fold(
             Ok(PositionOffset::default()),
             |res, item| {
@@ -1459,7 +1468,7 @@ impl<'a, B: Builtin> ArgumentList<'a, B> {
 
     pub fn into_empty(self, err: &mut EvalErrors) -> Result<(), Failed> {
         if !self.is_empty() {
-            err.add(self.pos, format!("expected zero arguments"));
+            err.add(self.pos, "expected zero arguments".to_string());
             Err(Failed)
         }
         else {
@@ -1486,6 +1495,7 @@ impl<'a, B: Builtin> ArgumentList<'a, B> {
         })
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn into_var_array<const N: usize>(
         self, err: &mut EvalErrors,
     ) -> Result<([Expression<'a, B>; N], Vec<Expression<'a, B>>), Failed> {
@@ -1497,6 +1507,7 @@ impl<'a, B: Builtin> ArgumentList<'a, B> {
         })
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn try_into_var_array<const N: usize>(
         mut self
     ) -> Result<([Expression<'a, B>; N], Vec<Expression<'a, B>>), Self> {
@@ -1779,7 +1790,7 @@ impl LoadErrors {
 
 impl fmt::Display for LoadErrors {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for &(ref path, ref err) in &self.0 {
+        for (path, err) in &self.0 {
             match *err {
                 Error::Parse(ref err) => {
                     writeln!(f, "{}: {}", path, err)?;

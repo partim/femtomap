@@ -379,7 +379,6 @@ impl Expression {
             || (),
             |(), item| {
                 fragments.push(item);
-                ()
             }
         )(input)?;
         Ok((input, Expression { fragments, pos }))
@@ -977,7 +976,7 @@ impl Quoted {
                             |span: Span| {
                                 char::try_from(
                                     u32::from_str_radix(
-                                        *span.fragment(),
+                                        span.fragment(),
                                         16
                                     ).unwrap()
                                 ).unwrap()
@@ -994,7 +993,7 @@ impl Quoted {
                 map(tag("\\\\"), |_| '\\'),
                 map(tag("\\\""), |_| '\"'),
             )),
-            || String::new(),
+            String::new,
             |mut acc: String, ch| { acc.push(ch); acc }
         )(input)?;
         let (input, _) = tag_char('"')(input)?;
@@ -1220,7 +1219,7 @@ impl Connector {
 
     pub fn tension(self) -> (f64, f64) {
         let res = match self {
-            Connector::Straight => std::f64::INFINITY,
+            Connector::Straight => f64::INFINITY,
             Connector::Smooth => 1.
         };
         (res, res)
@@ -1274,12 +1273,6 @@ impl AsRef<[u8]> for ShortString {
 impl borrow::Borrow<str> for ShortString {
     fn borrow(&self) -> &str {
         self.as_str()
-    }
-}
-
-impl borrow::Borrow<[u8]> for ShortString {
-    fn borrow(&self) -> &[u8] {
-        self.as_bytes()
     }
 }
 
@@ -1432,7 +1425,7 @@ mod test {
     use super::*;
 
     fn remains<'a, T>(res: IResult<Span<'a>, T>) -> &'a str {
-        *res.unwrap().0.fragment()
+        res.unwrap().0.fragment()
     }
 
     fn s(s: &str) -> Span<'_> {

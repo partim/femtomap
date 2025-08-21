@@ -140,6 +140,11 @@ impl<F: Feature> FeatureSet<F> {
         self.features.size()
     }
 
+    /// Returns whether the feature set is empty.
+    pub fn is_empty(&self) -> bool {
+        self.features.size() == 0
+    }
+
     /// Returns the shaped features for the given bounds and style.
     ///
     /// The method will shape all features that intersect with the given
@@ -327,6 +332,11 @@ impl<F: Feature> FeatureSetBuilder<F> {
     /// Returns the number of features in the builder.
     pub fn len(&self) -> usize {
         self.features.len()
+    }
+
+    /// Returns whether the builder is empty.
+    pub fn is_empty(&self) -> bool {
+        self.features.len() == 0
     }
 
     /// Inserts a feature into the set.

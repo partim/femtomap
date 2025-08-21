@@ -1,5 +1,5 @@
-/// Traces.
-///
+//! Traces.
+//!
 
 use std::{cmp, iter, slice};
 use std::f64::consts::PI;
@@ -169,7 +169,7 @@ pub struct SegmentIter<'a, S> {
 impl<'a, S: Transform> SegmentIter<'a, S> {
     fn new(path: &'a Trace, transform: &'a S) -> Self {
         let mut next_part = path.parts();
-        let &(_, _, ref part) = next_part.next().unwrap();
+        let (_, _, part) = next_part.next().unwrap();
         SegmentIter {
             next_part,
             next_seg: part.iter(transform),
@@ -310,6 +310,7 @@ impl<'a, S: Transform> Iterator for PartitionIter<'a, S> {
 
 /// A section of a path.
 #[derive(Clone, Debug)]
+#[allow(clippy::large_enum_variant)]
 enum Section {
     Subpath(Subpath),
     Edge(Edge),

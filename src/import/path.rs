@@ -48,7 +48,7 @@ impl ImportPathSet {
                 }
 
                 let path = path.path();
-                let mut file = match File::open(&path) {
+                let mut file = match File::open(path) {
                     Ok(file) => file,
                     Err(err) => {
                         errors.lock().unwrap().add(path, err.into());
@@ -60,9 +60,7 @@ impl ImportPathSet {
                     Err(_) => {
                         errors.lock().unwrap().add(
                             path,
-                            io::Error::new(
-                                io::ErrorKind::Other, "XML error"
-                            ).into()
+                            io::Error::other("XML error").into()
                         );
                         return WalkState::Continue
                     }
@@ -99,9 +97,9 @@ impl ImportPathSet {
         self.paths.get(key)
     }
 
-    pub fn iter<'a>(
-        &'a self
-    ) -> impl Iterator<Item = &'a ImportPath> {
+    pub fn iter(
+        &self
+    ) -> impl Iterator<Item = &'_ ImportPath> {
         self.paths.values()
     }
 }
@@ -117,6 +115,7 @@ pub struct ImportPath {
 }
 
 impl ImportPath {
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.len
     }
@@ -167,7 +166,7 @@ impl ImportPath {
 
     fn load_nodes(
         relation: &mut Relation,
-        key: &String,
+        key: &str,
         osm: &Osm,
         err: &mut PathError,
     ) -> (Vec<Node>, HashMap<String, u32>) {
@@ -179,7 +178,7 @@ impl ImportPath {
         for member in relation.members() {
             if member.mtype() != MemberType::Way {
                 err.add(Error::NonWayMember {
-                    rel: key.clone(), target: member.id()
+                    rel: key.to_owned(), target: member.id()
                 });
                 continue;
             }
@@ -188,7 +187,7 @@ impl ImportPath {
                 "" => false,
                 some => {
                     err.add(Error::UnknownRole {
-                        rel: key.clone(), target: member.id(),
+                        rel: key.to_owned(), target: member.id(),
                         role: some.into()
                     });
                     continue;
@@ -198,7 +197,7 @@ impl ImportPath {
                 Some(way) => way,
                 None => {
                     err.add(Error::MissingWay {
-                        rel: key.clone(), way: member.id()
+                        rel: key.to_owned(), way: member.id()
                     });
                     continue
                 }
@@ -209,7 +208,7 @@ impl ImportPath {
                 Some("straight") => f64::INFINITY,
                 Some(value) => {
                     err.add(Error::IllegalWayType {
-                        rel: key.clone(),
+                        rel: key.to_owned(),
                         way: way.id(), value: value.into()
                     });
                     1.
@@ -218,7 +217,7 @@ impl ImportPath {
 
             if way.nodes().is_empty() {
                 err.add(Error::EmptyWay {
-                    rel: key.clone(), way: way.id()
+                    rel: key.to_owned(), way: way.id()
                 });
                 continue;
             }
@@ -227,7 +226,7 @@ impl ImportPath {
                 let id = way_nodes.next().unwrap();
                 if last != id {
                     err.add(Error::NonContiguous {
-                        rel: key.clone(), way: way.id()
+                        rel: key.to_owned(), way: way.id()
                     });
                     // That’s the end of this relation, really.
                     return (nodes, node_names)
@@ -244,7 +243,7 @@ impl ImportPath {
                         name.clone(), nodes.len() as u32
                     ).is_some() {
                         err.add(Error::DuplicateName {
-                            rel: key.clone(), name
+                            rel: key.to_owned(), name
                         });
                     }
                 }
@@ -404,7 +403,7 @@ impl PathSetError {
 
 impl fmt::Display for PathSetError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for &(ref path, ref err_set) in &self.0 {
+        for (path, err_set) in &self.0 {
             for err in &err_set.0 {
                 writeln!(f, "{}: {}", path, err)?;
             }
@@ -416,6 +415,7 @@ impl fmt::Display for PathSetError {
 
 //------------ PathError -----------------------------------------------------
 
+#[derive(Default)]
 pub struct PathError(Vec<Error>);
 
 impl PathError {
@@ -458,7 +458,7 @@ impl<'a> IntoIterator for &'a PathError {
     type IntoIter = std::slice::Iter<'a, Error>;
 
     fn into_iter(self) -> Self::IntoIter {
-        (&self.0).into_iter()
+        self.0.iter()
     }
 }
 
