@@ -154,7 +154,7 @@ impl<F: Feature> FeatureSet<F> {
     pub fn shape(
         &self, scale: f64, bounds: world::Rect, style: &F::Style,
         canvas: &Canvas,
-    ) -> ShapedFeatures<F> {
+    ) -> ShapedFeatures<'_, F> {
         let mut shapes: Vec<_> = self.features.locate_in_envelope_intersecting(
             &Self::envelope(scale, bounds)
         ).filter_map(|item| {
@@ -236,7 +236,7 @@ pub struct ShapedFeatures<'a, F: Feature> {
 }
 
 impl<'a, F: Feature> ShapedFeatures<'a, F> {
-    pub fn iter(&self) -> slice::Iter<Shaped<'a, F>> {
+    pub fn iter(&self) -> slice::Iter<'_, Shaped<'a, F>> {
         self.shapes.iter()
     }
 

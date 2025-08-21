@@ -75,7 +75,7 @@ impl<P: Properties> Layout<P> {
 
     pub fn shape(
         &self, base: Vec2, style: &P::Style, canvas: &Canvas
-    ) -> ShapedLayout<P>
+    ) -> ShapedLayout<'_, P>
     where P: Properties {
         let mut block = match &self.content {
             LayoutContent::Vbox(inner) => inner.shape(style, canvas),
@@ -167,7 +167,7 @@ impl<P: Properties> Block<P> {
 impl<P: Properties> Block<P> {
     fn shape_content(
         &self, style: &P::Style, canvas: &Canvas
-    ) -> Option<ShapedBlock<P>> {
+    ) -> Option<ShapedBlock<'_, P>> {
         match self.content {
             BlockContent::Vbox(ref vbox) => Some(vbox.shape(style, canvas)),
             BlockContent::Hbox(ref hbox) => Some(hbox.shape(style, canvas)),
@@ -229,7 +229,7 @@ impl<P: Properties> Vbox<P> {
 
     fn shape(
         &self, style: &P::Style, canvas: &Canvas
-    ) -> ShapedBlock<P>
+    ) -> ShapedBlock<'_, P>
     where P: Properties {
         let mut inner = Rect::default();
         let mut children = Vec::with_capacity(self.lines.len());
@@ -363,7 +363,7 @@ impl<P: Properties> Hbox<P> {
 
     fn shape(
         &self, style: &P::Style, canvas: &Canvas
-    ) -> ShapedBlock<P>
+    ) -> ShapedBlock<'_, P>
     where P: Properties {
         let mut inner = Rect::default();
         let mut children = Vec::with_capacity(self.columns.len());
@@ -483,7 +483,7 @@ impl<P: Properties> Span<P> {
 
     fn shape(
         &self, style: &P::Style, canvas: &Canvas
-    ) -> ShapedBlock<P>
+    ) -> ShapedBlock<'_, P>
     where P: Properties {
         let text = canvas.prepare_text(
             self.properties.span_text(&self.text, style),
@@ -536,7 +536,7 @@ impl<P> Rule<P> {
 
     fn shape(
         &self, style: &P::Style, _: &Canvas
-    ) -> ShapedBlock<P>
+    ) -> ShapedBlock<'_, P>
     where P: Properties {
         let inner = Rect::default();
         let (frame, outer) = frame_and_outer_extents(

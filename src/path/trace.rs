@@ -109,7 +109,7 @@ impl Trace {
         res.into()
     }
 
-    fn parts(&self) -> PartsIter {
+    fn parts(&self) -> PartsIter<'_> {
         self.parts.iter()
     }
 

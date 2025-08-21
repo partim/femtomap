@@ -43,7 +43,7 @@ impl Canvas {
 }
 
 impl Canvas {
-    pub fn sketch(&mut self) -> Sketch {
+    pub fn sketch(&mut self) -> Sketch<'_> {
         Sketch::new(self)
     }
 

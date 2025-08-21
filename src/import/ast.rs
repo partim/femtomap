@@ -1435,7 +1435,7 @@ mod test {
         *res.unwrap().0.fragment()
     }
 
-    fn s(s: &str) -> Span {
+    fn s(s: &str) -> Span<'_> {
         Span::new(s)
     }
 

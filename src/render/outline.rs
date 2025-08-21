@@ -154,11 +154,11 @@ impl Outline {
 
     pub fn iter_positions(
         &self, part_len: f64, offset: Option<f64>
-    ) -> PositionIter {
+    ) -> PositionIter<'_> {
         PositionIter::new(self, part_len, offset)
     }
 
-    pub fn positions(&self) -> Positions {
+    pub fn positions(&self) -> Positions<'_> {
         Positions::new(self)
     }
 }
