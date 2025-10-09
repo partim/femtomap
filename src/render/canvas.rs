@@ -457,6 +457,14 @@ impl Matrix {
     pub fn rotate(self, angle: f64) -> Self {
         self.convert(|res| res.rotate(angle))
     }
+
+    pub fn invert(self) -> Self {
+        self.convert(|res| res.invert())
+    }
+
+    pub fn transform_point(&self, point: Point) -> Point {
+        self.cairo.transform_point(point.x, point.y).into()
+    }
 }
 
 impl SketchProperty for Matrix {
