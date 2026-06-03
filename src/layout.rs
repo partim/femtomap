@@ -67,9 +67,9 @@ impl<P: Properties> Layout<P> {
 
     pub fn properties_mut(&mut self) -> &mut P {
         match &mut self.content {
-            LayoutContent::Vbox(ref mut inner) => &mut inner.properties,
-            LayoutContent::Hbox(ref mut inner) => &mut inner.properties,
-            LayoutContent::Span(ref mut inner) => &mut inner.properties,
+            LayoutContent::Vbox(inner) => &mut inner.properties,
+            LayoutContent::Hbox(inner) => &mut inner.properties,
+            LayoutContent::Span(inner) => &mut inner.properties,
         }
     }
 
